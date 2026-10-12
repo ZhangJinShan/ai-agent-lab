@@ -24,7 +24,7 @@ public class Main {
         }
 
         // 2. 读环境变量里的 api-key
-        String apiKey = System.getenv("API_KEY");
+        String apiKey = System.getenv("LLM_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             System.err.println("请先设置环境变量 LLM_API_KEY(设置后需重启 IDE/终端)");
             return;
@@ -39,5 +39,9 @@ public class Main {
         System.out.println("  model   = " + properties.getProperty("llm.model"));
         System.out.println("  apiKey  = 已加载(" + apiKey.length() + " 个字符)");
 
+
+//        String answer = llmClient.chat("你是一个简洁的助手", "你好,请用一句话介绍你自己");
+//
+//        System.out.println("模型回复: " + answer);
     }
 }

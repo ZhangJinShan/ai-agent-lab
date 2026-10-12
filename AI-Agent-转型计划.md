@@ -68,8 +68,8 @@ uv python install 3.12
 ### 今天要干什么(每天约 1.5–2 小时,共 5 天)
 
 - [x] **Day 1**:创建 Maven 工程 + 配置加载(详解见下)
-- [ ] **Day 2**:实现 `chat()` 同步调用 + 错误处理
-- [ ] **Day 3**:实现流式输出(SSE 解析)
+- [ ] **Day 2**:实现 `chat()` 同步调用 + 错误处理(详解见下)
+- [ ] **Day 3**:实现流式输出(SSE 解析,详解见下)
 - [ ] **Day 4**:实现 JSON 结构化提取
 - [ ] **Day 5**:写 3 个单元测试(用 mock HTTP)+ 整理 README
 
@@ -292,13 +292,174 @@ mvn compile exec:java -Dexec.mainClass=com.example.llm.Main
 
 ---
 
-### Day 2 核心代码:`chat()` 同步调用
+### Day 2:实现 `chat()` 同步调用 + 错误处理(约 2 小时)
 
-**你要手写的东西**(先自己写,写不下去再看下面的参考骨架):
+**今天第一次真正调用大模型。** 目标:在 `Main` 里问一句「你好」,把模型的回答打印出来;并且把错误 key / 断网时的报错处理干净。
 
-> 需求:给定 system prompt + 用户消息,调用 OpenAI 兼容接口 `/v1/chat/completions`,返回助手回复文本。API Key 从环境变量 `LLM_API_KEY` 读取,base URL 和模型名从 `application.properties` 读取。
+> 需求:给定 system prompt + 用户消息,调用 OpenAI 兼容接口 `POST {baseUrl}/chat/completions`,返回助手回复文本。今天在 Day 1 的 `LlmClient` 里加一个 `chat()` 方法——**全程只改两个文件**:`LlmClient.java` 和 `Main.java`。
 
-参考骨架(**TODO 处必须自己填**):
+#### 2.1 先用 curl 打一发(15 分钟,不写 Java)
+
+接陌生接口,老后端的肌肉记忆是先 curl 一发看报文。今天先把「LLM 接口就是一个普通 HTTP POST」这件事焊死:
+
+```bash
+curl https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LLM_API_KEY" \
+  -d '{
+    "model": "glm-5.3",
+    "messages": [
+      {"role": "system", "content": "你是一个简洁的助手"},
+      {"role": "user", "content": "你好"}
+    ]
+  }'
+```
+
+看清楚响应 JSON 的结构(**这就是你等下解析的目标**):
+
+```json
+{
+	"id": "chatcmpl-7942401f-434c-9961-9ba1-c9d1516f6f27",
+	"object": "chat.completion",
+	"created": 1791818372,
+	"model": "glm-5.3",
+	"choices": [{
+		"index": 0,
+		"message": {
+			"role": "assistant",
+			"reasoning_content": "The user just said \"你好\" (Hello) in Chinese. According to my system prompt, I am a concise assistant (简洁的助手 means \"concise assistant\" in Chinese).\n\nSince the user greeted me in Chinese, I should respond in Chinese. And since I'm supposed to be concise, I should keep my response brief and simple.\n\nA simple greeting back would be appropriate:\n\"你好！有什么我可以帮助你的吗？\" (Hello! Is there anything I can help you with?)\n\nOr even shorter: \"你好！有什么可以帮你的吗？\"\n\nLet me keep it simple and friendly, matching the user's language.",
+			"content": "你好！有什么可以帮你的吗？"
+		},
+		"finish_reason": "stop",
+		"logprobs": null
+	}],
+	"usage": {
+		"prompt_tokens": 19,
+		"total_tokens": 154,
+		"completion_tokens": 135,
+		"prompt_tokens_details": {
+			"cached_tokens": 0
+		},
+		"completion_tokens_details": {
+			"reasoning_tokens": 126
+		}
+	}
+}
+```
+
+记住三个关键路径(背下来,后面几周天天用):
+
+| 路径                           | 含义                             | 什么时候用     |
+| ---------------------------- | ------------------------------ | --------- |
+| `choices[0].message.content` | 回复文本                           | 今天        |
+| `finish_reason`              | 结束原因(`stop` 正常 / `length` 被截断) | Day 4 会遇到 |
+| `usage.*`                    | token 账单                       | 第 4 周算钱   |
+
+**curl 就跑不通的话,不要写 Java**——先解决 key/网络问题,Java 里遇到的是同一类错误。
+
+#### 2.2 组装请求体(20 分钟)
+
+在 `LlmClient` 里新增 `chat(String systemPrompt, String userMessage)` 方法。第一步:用 `LinkedHashMap` 拼出 2.1 里那个 JSON:
+
+```java
+Map<String, Object> body = new LinkedHashMap<>();
+body.put("model", model);
+body.put("messages", List.of(
+        Map.of("role", "system", "content", systemPrompt),
+        Map.of("role", "user", "content", userMessage)
+));
+String jsonBody = mapper.writeValueAsString(body);
+```
+
+> 为什么用 `LinkedHashMap` 不用 `HashMap`?——JSON 字段顺序可读、日志好排查。这种小讲究就是「工程手感」的一部分。
+
+#### 2.3 构造 HttpRequest(20 分钟)
+
+```java
+HttpRequest request = HttpRequest.newBuilder()
+        .uri(URI.create(baseUrl + "/chat/completions"))   // 注意:baseUrl 末尾不带 /
+        .header("Content-Type", "application/json")
+        .header("Authorization", "Bearer " + apiKey)      // Bearer 后面有空格!
+        .timeout(Duration.ofSeconds(60))                  // 生成可能慢,给足
+        .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+        .build();
+```
+
+#### 2.4 发送 + 错误处理(30 分钟,今天的重点)
+
+```java
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+if (response.statusCode() != 200) {
+    // 关键:把服务端的错误内容带进异常,方便排查
+    String err = response.body();
+    if (err.length() > 500) err = err.substring(0, 500);
+    throw new RuntimeException("LLM 调用失败,HTTP " + response.statusCode() + ": " + err);
+}
+```
+
+各状态码的含义(排查时对照这张表):
+
+| 状态码  | 含义                          | 你该干嘛                           |
+| ---- | --------------------------- | ------------------------------ |
+| 401  | key 错了 / 没带 `Authorization` | 检查环境变量和 `Bearer ` 拼接           |
+| 400  | 请求体 JSON 不合法                | 打印 `jsonBody` 自己看,或丢进 jsonlint |
+| 429  | 限流 / 欠费                     | 等一会重试,或查账户余额(重试策略是第 4 周的事)     |
+| 5xx  | 服务端抖动                       | 稍后重试,今天先记下来                    |
+
+#### 2.5 解析响应(15 分钟)
+
+```java
+JsonNode root = mapper.readTree(response.body());
+String content = root.path("choices").path(0)
+        .path("message").path("content").asText();
+if (content.isEmpty()) {
+    throw new RuntimeException("响应里没有 content,原始响应: " + response.body());
+}
+return content;
+```
+
+> 用 `path()` 而不是 `get()`:字段缺失返回空节点,不会 NPE——LLM 的响应永远要当「不可信输入」对待,这个习惯从今天开始养成。
+
+#### 2.6 改造 Main(10 分钟)
+
+把 Day 1 的 `Main` 末尾「打印配置」换成真实调用:
+
+```java
+String answer = client.chat("你是一个简洁的助手", "你好,请用一句话介绍你自己");
+System.out.println("模型回复: " + answer);
+```
+
+#### 2.7 运行验证(15 分钟)
+
+正常路径的期望输出:
+
+```
+配置加载成功!
+模型回复: 你好!我是一个简洁的 AI 助手,很高兴为你服务。
+```
+
+**错误路径必须测一遍**(这是今天的隐藏考点):
+
+```bash
+LLM_API_KEY=sk-错误的key mvn compile exec:java ...
+```
+
+期望:程序不崩出一堆天书堆栈,而是打印/抛出包含 `HTTP 401` 和服务端错误内容的异常信息。看到 `Authentication Fails` 之类的原文,才算错误处理合格。
+
+#### 2.8 常见卡点
+
+| 现象                      | 原因 / 解法                                  |
+| ----------------------- | ---------------------------------------- |
+| 报 404                   | URL 拼错了。确认是 `{baseUrl}/chat/completions`,且 baseUrl 是 `.../v1` 结尾、后面**不带** `/` |
+| 报 401 但 key 是对的         | `Bearer ` 后少了空格,或 key 里混进了换行/引号(`echo $LLM_API_KEY` 检查) |
+| 能通但打印空字符串               | 解析路径写错(比如漏了 `message` 层);把 `response.body()` 整个打印出来对照 2.1 的结构 |
+| 连接超时                    | 网络问题;公司代理环境需要给 HttpClient 配 proxy        |
+| `writeValueAsString` 报错 | `Map.of` 不允许 null 值——systemPrompt 传了 null,调用方判空 |
+
+#### 2.9 参考骨架(汇总版,先自己写,写不下去再对照)
+
+**TODO 处必须自己填**:
 
 ```java
 package com.example.llm;
@@ -352,43 +513,192 @@ public class LlmClient {
 }
 ```
 
-**自测点(必须通过才算完成)**:
+**Day 2 打卡项**:
 
-- [ ] 断网/错误 key 时,抛出的异常信息里包含服务端返回的错误内容(而不是一个 NPE)
-- [ ] 正常调用返回文本,能打印出来
+- [x] curl 手动跑通,能徒手画出请求/响应 JSON 结构
+- [x] `chat()` 正常调用返回文本并打印
+- [x] 断网/错误 key 时,异常信息里包含 HTTP 状态码和服务端返回的错误内容(而不是一个 NPE)
+- [x] 响应缺 `content` 字段时,抛出的异常带上原始响应(而不是返回空字符串蒙混过关)
+- [x] 合上文档,能在 20 分钟内重写出 `chat()` 的请求组装 → 发送 → 解析三段
+- [x] git 提交:`git add -A && git commit -m "W1D2: chat() 同步调用 + 错误处理"`
 
-### Day 3:流式输出(SSE)
+### Day 3:流式输出(SSE 解析,约 2 小时)
 
-> 这是面试常考题,也是体验的关键——用户盯着屏幕等 10 秒和看字往外蹦,是两个产品。
+**今天体验产品的分水岭。** 用户盯着屏幕干等 10 秒,和看字一个个往外蹦,是两个产品——ChatGPT 靠流式赢得了第一印象。目标:给 `LlmClient` 加一个 `chatStream()` 方法,回答在控制台**逐段往外蹦**,而不是最后一坨吐出来。
 
-**协议要点**(自己读一遍 SSE 格式再动手):
+> 今天也**只改两个文件**:`LlmClient.java` 和 `Main.java`。这是面试常考题(「流式的原理是什么?」「和普通 HTTP 响应有什么区别?」),今天做完你就能拿自己的实现回答。
+
+#### 3.1 先用 curl 看 SSE 长什么样(20 分钟,不写 Java)
+
+延续昨天的肌肉记忆:先看报文。在 2.1 的 curl 命令上只加一行 `"stream": true`:
+
+```bash
+curl -N https://api.deepseek.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LLM_API_KEY" \
+  -d '{
+    "model": "deepseek-chat",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "从 1 数到 5,用逗号分隔"}
+    ]
+  }'
+```
+
+`-N` 是「不缓冲」,否则 curl 会攒够一块才显示,你就看不到「流」的效果了。观察输出的原始样子:
 
 ```
-POST /chat/completions,请求体加一行: "stream": true
-响应是一行一行的 SSE 事件:
-  data: {"choices":[{"delta":{"content":"你"}}]}
-  data: {"choices":[{"delta":{"content":"好"}}]}
-  data: [DONE]
+data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":"1"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":","},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":"2"},"finish_reason":null}]}
+...
+data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
 ```
 
-**你要实现的接口**:
+**三个必须看懂的协议事实**(自己总结,写进笔记):
+
+1. 每个事件是 `data: ` 前缀 + JSON,**事件之间隔着空行**(SSE 标准格式,不是我们能改的)
+2. 增量在 `delta.content` 里(对比昨天的 `message.content`——完整回复是把所有 `delta.content` **拼接**起来)
+3. 首尾两个 chunk 的 `delta` 里**没有 content 字段**(开头只有 role,结尾只有 `finish_reason`)——这是新手 NPE 的重灾区;结束标志是单独一行 `data: [DONE]`
+
+#### 3.2 定接口:回调式(10 分钟)
+
+流式不适合「返回一个 String」的签名——等你返回,流就白流了。改成回调:
 
 ```java
-// 回调式,每收到一段增量文本就调用一次 onToken
+// 每收到一段增量文本,onToken 就被调用一次
 public void chatStream(String systemPrompt, String userMessage, Consumer<String> onToken)
 ```
 
-实现要点 checklist:
+> 为什么用 `Consumer<String>` 而不是返回 `Stream<String>` 或 `Iterator`?——回调最简单,而且天然适配 Web 场景(把 onToken 接到 SSE 推送/WebSocket 上就是聊天室产品)。想挑战可以做完后试试返回 `Stream<String>`,对比两种风格。
 
-- [ ] 用 `HttpClient.send(request, BodyHandlers.ofLines())` 拿行流
-- [ ] 每行判断是否以 `data: ` 开头;等于 `data: [DONE]` 时结束
-- [ ] 剥掉 `data: ` 前缀后解析 JSON,取出 `choices[0].delta.content`(注意:**delta 里可能没有 content 字段**,要判空!)
-- [ ] content 为空的行直接跳过,不要 NPE
+#### 3.3 请求体:复用 2.2,只加一行(10 分钟)
 
-**自测点**:
+昨天的 body 组装几乎照搬,只加:
 
-- [ ] 运行后文字逐段蹦出来,而不是最后一坨
-- [ ] 打印收到的 chunk 总数和拼接结果 == 同步版的结果
+```java
+body.put("stream", true);
+```
+
+思考题:如果不加这一行会怎样?——服务端返回完整的 JSON,你按行解析永远等不到 `data: [DONE]`。这行字就是「同步 vs 流式」的开关。
+
+#### 3.4 读行流(20 分钟,今天的重点之一)
+
+```java
+HttpResponse<Stream<String>> response =
+        http.send(request, HttpResponse.BodyHandlers.ofLines());
+```
+
+**但先别急着读流——错误处理顺序是个坑**:
+
+```java
+if (response.statusCode() != 200) {
+    // 注意!出错时响应体不是 SSE,是普通 JSON 错误,得先把行拼回来看
+    String err = response.body().collect(Collectors.joining());
+    throw new RuntimeException("LLM 调用失败,HTTP " + response.statusCode() + ": " + err.substring(0, Math.min(err.length(), 500)));
+}
+// 200 才开始逐行消费
+response.body().forEach(line -> { ... });
+```
+
+> 如果先 `forEach` 再判断状态码,错误响应的 JSON 会按行喂进 SSE 解析,得到一堆莫名其妙的空 chunk——这个 bug 半夜排查起来非常酸爽,今天提前避开。
+
+#### 3.5 解析每一行(30 分钟)
+
+逐行处理逻辑(伪代码先写出来,再落成 Java):
+
+```
+对每一行 line:
+  1. 不以 "data: " 开头 → 跳过(SSE 里还有 event:/id: 等行,这里用不到)
+  2. 剥掉 "data: " 前缀,得到 payload
+  3. payload 等于 "[DONE]" → 标记结束
+  4. 否则解析 JSON,取 choices[0].delta.content
+     - 取不到(null / 缺字段)→ 跳过这行,千万别 NPE
+     - 取到了 → 调用 onToken(content)
+```
+
+参考写法(**先把 1–4 自己写出来,再对照**):
+
+```java
+boolean done = false;
+for (String line : (Iterable<String>) response.body()::iterator) {
+    if (done || !line.startsWith("data: ")) continue;
+    String payload = line.substring("data: ".length()).trim();
+    if ("[DONE]".equals(payload)) { done = true; continue; }
+
+    JsonNode delta = mapper.readTree(payload)
+            .path("choices").path(0).path("delta");
+    JsonNode contentNode = delta.path("content");
+    if (contentNode.isMissingNode() || contentNode.isNull()) continue;  // 首尾 chunk 在这里被跳过
+
+    onToken.accept(contentNode.asText());
+}
+```
+
+> 这里用 `path()` + `isMissingNode()` 的套路和昨天 2.5 一脉相承——**把 LLM 的每一行输出都当不可信输入**。这个防御姿态练熟了,后面写 tool use 循环你会感谢自己。
+
+#### 3.6 改造 Main:让字「蹦」出来(15 分钟)
+
+```java
+StringBuilder sb = new StringBuilder();
+client.chatStream("你是一个简洁的助手", "从 1 数到 10,用逗号分隔", token -> {
+    System.out.print(token);   // 注意是 print 不是 println!println 会一行一个词
+    sb.append(token);
+});
+System.out.println();          // 收尾换行
+System.out.println("共收到 " + sb.length() + " 个字符");
+```
+
+#### 3.7 运行验证(15 分钟)
+
+- [ ] **体感验收**:字是一个个蹦出来的,不是说完话才一坨出现(问个「写一首 100 字的诗」让流足够长,看得更清楚)
+- [ ] **一致性验收**:用「从 1 数到 5」这种有标准答案的问题,`sb` 拼接结果和昨天同步版 `chat()` 的回答对比——允许措辞差异,但数字内容应一致
+- [ ] **错误路径验收**:`LLM_API_KEY=sk-错误的key` 跑一遍,确认抛出的还是清晰的「HTTP 401 + 服务端原文」,而不是一串解析空 chunk 的怪异日志(3.4 的顺序坑)
+
+#### 3.8 常见卡点
+
+| 现象 | 原因 / 解法 |
+|---|---|
+| 根本没有「蹦字」效果,最后一坨出来 | 忘了 `stream: true`;或 curl 没加 `-N`;或 `System.out` 被自动 flush 缓冲(println/加 `System.out.flush()`) |
+| 每行解析都拿到空内容 | 取错层级:增量在 `delta.content`,不是 `message.content`(昨天的肌肉记忆串台了) |
+| 第一行就 NPE / 解析报错 | 首尾 chunk 没有 content 字段,忘了判空跳过 |
+| 程序跑完但没输出就退出 | `ofLines()` 的流没消费完;确认 `forEach`/循环跑到了 `[DONE]` |
+| 中文显示乱码 | 打印端编码问题(Windows 终端常见),先用英文 prompt 验证逻辑 |
+| 想中途断开(用户关页面) | 正常,产品里会在 onToken 里检查会话状态并抛异常中断——今天知道概念就行,第 12 周做可靠性时细讲 |
+
+#### 3.9 参考骨架(汇总版)
+
+```java
+public void chatStream(String systemPrompt, String userMessage, Consumer<String> onToken) {
+    try {
+        // 1. 组装 body(同 chat(),但多一行 stream=true)—— 可以抽个公共方法 buildBody()
+        // 2. 构造 HttpRequest(同 chat())
+        // 3. send(..., BodyHandlers.ofLines())
+        // 4. 状态码 != 200 → 拼行报错,别解析 SSE
+        // 5. 逐行解析,处理 "data: " 前缀、[DONE]、delta.content 判空
+        //    拿到 content → onToken.accept(content)
+    } catch (Exception e) {
+        throw new RuntimeException("LLM 流式调用失败: " + e.getMessage(), e);
+    }
+}
+```
+
+> 顺手做个小重构:`chat()` 和 `chatStream()` 的请求组装是重复的,抽一个私有 `buildRequest(...)`/`buildBody(...)`——今天开始留意「重复代码」的气味,这是你和 AI 生成代码的区别之一。
+
+**Day 3 打卡项**:
+
+- [ ] curl 看懂 SSE 原始报文,能说出 `delta.content` 和 `message.content` 的区别
+- [ ] `chatStream()` 实现完成,控制台逐字往外蹦
+- [ ] 首尾 chunk(无 content)被安全跳过,全程无 NPE
+- [ ] 错误 key 测试:报错信息清晰(状态码 + 服务端原文),不是解析怪异日志
+- [ ] 合上文档,能在 25 分钟内重写出「读行流 → 前缀判断 → [DONE] 判空 → onToken」的主流程
+- [ ] git 提交:`git add -A && git commit -m "W1D3: chatStream() 流式输出 SSE 解析"`
 
 ### Day 4:JSON 结构化提取
 
