@@ -1,5 +1,6 @@
 package com.example.llm;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,14 +56,7 @@ public class LlmClient {
             HttpRequest request = getHttpRequest(body);
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
-            if (response.statusCode() != 200) {
-                throwLlmError(response.statusCode(), response.body());
-            }
-            String content = extractChoiceContent(mapper.readTree(response.body()), "message");
-            if (content == null || content.isEmpty()) {
-                throw new RuntimeException("响应里没有 content,原始响应: " + response.body());
-            }
-            return content;
+            return parseChatResponse(response);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -103,6 +97,58 @@ public class LlmClient {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true) // LLM 偶尔会多输出字段,忽略掉而不是解析失败
+    public record Resume(String name, int years, List<String> skills) {}
+
+    public Resume extractJson(String systemPrompt, String userText) {
+        // 1. 调 chat() 拿回复
+        String reply = chat(systemPrompt, userText);
+        try {
+            // 2. 解析
+            return parseResume(reply);
+        } catch (Exception first) {
+            // 3. 解析失败 → 把「你的输出不是合法 JSON,请重新只输出 JSON」追加进对话重试 1 次
+            //    chat() 只支持单轮,这里把上一次的错误输出和提示拼进 userText 模拟多轮
+            String retryReply = chat(systemPrompt,
+                    userText + "\n\n你上一次的输出:\n" + reply + "\n你的输出不是合法 JSON,请重新只输出 JSON");
+            try {
+                return parseResume(retryReply);
+            } catch (Exception second) {
+                // 4. 再失败 → 抛异常,带上原始输出
+                throw new RuntimeException("LLM 输出不是合法的 Resume JSON,原始输出: " + retryReply, second);
+            }
+        }
+    }
+
+    public Resume chatExtractJson(String systemPrompt, String userText){
+        Map<String, Object> body = buildBody(systemPrompt, userText, false);
+        body.put("response_format", Map.of("type", "json_object"));
+        try {
+            HttpRequest httpRequest = getHttpRequest(body);
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            String content = parseChatResponse(response);
+            return mapper.readValue(content, Resume.class);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String parseChatResponse(HttpResponse<String> response) throws JsonProcessingException {
+        if (response.statusCode() != 200) {
+            throwLlmError(response.statusCode(), response.body());
+        }
+        String content = extractChoiceContent(mapper.readTree(response.body()), "message");
+        if (content == null || content.isEmpty()) {
+            throw new RuntimeException("响应里没有 content,原始响应: " + response.body());
+        }
+        return content;
+    }
+
+
+    private Resume parseResume(String reply) throws JsonProcessingException {
+        return mapper.treeToValue(mapper.readTree(reply), Resume.class);
+    }
+
     private Map<String, Object> buildBody(String systemPrompt, String userMessage, boolean stream) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
@@ -135,7 +181,7 @@ public class LlmClient {
 
         return HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/chat/completions"))
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofSeconds(60)) // LLM 生成耗时长,10 秒不够用
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + apiKey)      // Bearer 后面有空格!
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))

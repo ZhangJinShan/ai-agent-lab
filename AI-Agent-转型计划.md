@@ -68,10 +68,10 @@ uv python install 3.12
 ### 今天要干什么(每天约 1.5–2 小时,共 5 天)
 
 - [x] **Day 1**:创建 Maven 工程 + 配置加载(详解见下)
-- [ ] **Day 2**:实现 `chat()` 同步调用 + 错误处理(详解见下)
+- [x] **Day 2**:实现 `chat()` 同步调用 + 错误处理(详解见下)
 - [ ] **Day 3**:实现流式输出(SSE 解析,详解见下)
-- [ ] **Day 4**:实现 JSON 结构化提取
-- [ ] **Day 5**:写 3 个单元测试(用 mock HTTP)+ 整理 README
+- [ ] **Day 4**:实现 JSON 结构化提取(详解见下)
+- [ ] **Day 5**:写 3 个单元测试(用 mock HTTP)+ 整理 README(详解见下)
 
 ---
 
@@ -533,14 +533,15 @@ public class LlmClient {
 延续昨天的肌肉记忆:先看报文。在 2.1 的 curl 命令上只加一行 `"stream": true`:
 
 ```bash
-curl -N https://api.deepseek.com/v1/chat/completions \
+curl -N https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LLM_API_KEY" \
   -d '{
-    "model": "deepseek-chat",
+    "model": "glm-5.3",
     "stream": true,
     "messages": [
-      {"role": "user", "content": "从 1 数到 5,用逗号分隔"}
+      {"role": "system", "content": "你是一个简洁的助手"},
+      {"role": "user", "content": "你好"}
     ]
   }'
 ```
@@ -548,15 +549,15 @@ curl -N https://api.deepseek.com/v1/chat/completions \
 `-N` 是「不缓冲」,否则 curl 会攒够一块才显示,你就看不到「流」的效果了。观察输出的原始样子:
 
 ```
-data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {"model":"glm-5.3","id":"chatcmpl-68e6b114-8b39-94d4-a7b7-dfd432aed82c","created":1791897122,"object":"chat.completion.chunk","usage":null,"choices":[{"logprobs":null,"index":0,"delta":{"reasoning_content":"","content":"","role":"assistant"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":"1"},"finish_reason":null}]}
+data: {"id":"chatcmpl-68e6b114-8b39-94d4-a7b7-dfd432aed82c","object":"chat.completion.chunk","created":1791897122,"model":"glm-5.3","choices":[{"index":0,"delta":{"content":"","reasoning_content":"The"},"logprobs":null,"finish_reason":null}],"usage":null}
 
-data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":","},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":"2"},"finish_reason":null}]}
 ...
-data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-68e6b114-8b39-94d4-a7b7-dfd432aed82c","object":"chat.completion.chunk","created":1791897124,"model":"glm-5.3","choices":[{"index":0,"delta":{"content":"","reasoning_content":""},"finish_reason":"stop","logprobs":null}],"usage":null}
+
+data: {"id":"chatcmpl-68e6b114-8b39-94d4-a7b7-dfd432aed82c","object":"chat.completion.chunk","created":1791897124,"model":"glm-5.3","choices":[],"usage":{"prompt_tokens":19,"total_tokens":151,"completion_tokens":132,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":123}}}
 
 data: [DONE]
 ```
@@ -564,8 +565,9 @@ data: [DONE]
 **三个必须看懂的协议事实**(自己总结,写进笔记):
 
 1. 每个事件是 `data: ` 前缀 + JSON,**事件之间隔着空行**(SSE 标准格式,不是我们能改的)
-2. 增量在 `delta.content` 里(对比昨天的 `message.content`——完整回复是把所有 `delta.content` **拼接**起来)
-3. 首尾两个 chunk 的 `delta` 里**没有 content 字段**(开头只有 role,结尾只有 `finish_reason`)——这是新手 NPE 的重灾区;结束标志是单独一行 `data: [DONE]`
+2. 增量思考的过程是在 delta.reasoning_content 中，会先定位自己的角色，然后思考要回复的内容，然后才是将要回复的内容增量添加到 `delta.content` 里(对比昨天的 `message.content`——完整回复是把所有 `delta.content` **拼接**起来)
+3. 第一个 chunk 中是 role 角色定义，倒数第二个 chunk 有一个 finish_reason 表示请求结束，最后一个 chunk 中会出现 completion_tokens_details 表示消耗的 token，这几个 **chunk 里没有 content 字段**
+4. 结束标志是单独一行 `data: [DONE]` 
 
 #### 3.2 定接口:回调式(10 分钟)
 
@@ -657,20 +659,20 @@ System.out.println("共收到 " + sb.length() + " 个字符");
 
 #### 3.7 运行验证(15 分钟)
 
-- [ ] **体感验收**:字是一个个蹦出来的,不是说完话才一坨出现(问个「写一首 100 字的诗」让流足够长,看得更清楚)
-- [ ] **一致性验收**:用「从 1 数到 5」这种有标准答案的问题,`sb` 拼接结果和昨天同步版 `chat()` 的回答对比——允许措辞差异,但数字内容应一致
-- [ ] **错误路径验收**:`LLM_API_KEY=sk-错误的key` 跑一遍,确认抛出的还是清晰的「HTTP 401 + 服务端原文」,而不是一串解析空 chunk 的怪异日志(3.4 的顺序坑)
+- [x] **体感验收**:字是一个个蹦出来的,不是说完话才一坨出现(问个「写一首 100 字的诗」让流足够长,看得更清楚)
+- [x] **一致性验收**:用「从 1 数到 5」这种有标准答案的问题,`sb` 拼接结果和昨天同步版 `chat()` 的回答对比——允许措辞差异,但数字内容应一致
+- [x] **错误路径验收**:`LLM_API_KEY=sk-错误的key` 跑一遍,确认抛出的还是清晰的「HTTP 401 + 服务端原文」,而不是一串解析空 chunk 的怪异日志(3.4 的顺序坑)
 
 #### 3.8 常见卡点
 
-| 现象 | 原因 / 解法 |
-|---|---|
+| 现象                | 原因 / 解法                                  |
+| ----------------- | ---------------------------------------- |
 | 根本没有「蹦字」效果,最后一坨出来 | 忘了 `stream: true`;或 curl 没加 `-N`;或 `System.out` 被自动 flush 缓冲(println/加 `System.out.flush()`) |
-| 每行解析都拿到空内容 | 取错层级:增量在 `delta.content`,不是 `message.content`(昨天的肌肉记忆串台了) |
-| 第一行就 NPE / 解析报错 | 首尾 chunk 没有 content 字段,忘了判空跳过 |
-| 程序跑完但没输出就退出 | `ofLines()` 的流没消费完;确认 `forEach`/循环跑到了 `[DONE]` |
-| 中文显示乱码 | 打印端编码问题(Windows 终端常见),先用英文 prompt 验证逻辑 |
-| 想中途断开(用户关页面) | 正常,产品里会在 onToken 里检查会话状态并抛异常中断——今天知道概念就行,第 12 周做可靠性时细讲 |
+| 每行解析都拿到空内容        | 取错层级:增量在 `delta.content`,不是 `message.content`(昨天的肌肉记忆串台了) |
+| 第一行就 NPE / 解析报错   | 首尾 chunk 没有 content 字段,忘了判空跳过            |
+| 程序跑完但没输出就退出       | `ofLines()` 的流没消费完;确认 `forEach`/循环跑到了 `[DONE]` |
+| 中文显示乱码            | 打印端编码问题(Windows 终端常见),先用英文 prompt 验证逻辑   |
+| 想中途断开(用户关页面)      | 正常,产品里会在 onToken 里检查会话状态并抛异常中断——今天知道概念就行,第 12 周做可靠性时细讲 |
 
 #### 3.9 参考骨架(汇总版)
 
@@ -693,28 +695,242 @@ public void chatStream(String systemPrompt, String userMessage, Consumer<String>
 
 **Day 3 打卡项**:
 
-- [ ] curl 看懂 SSE 原始报文,能说出 `delta.content` 和 `message.content` 的区别
-- [ ] `chatStream()` 实现完成,控制台逐字往外蹦
-- [ ] 首尾 chunk(无 content)被安全跳过,全程无 NPE
-- [ ] 错误 key 测试:报错信息清晰(状态码 + 服务端原文),不是解析怪异日志
-- [ ] 合上文档,能在 25 分钟内重写出「读行流 → 前缀判断 → [DONE] 判空 → onToken」的主流程
-- [ ] git 提交:`git add -A && git commit -m "W1D3: chatStream() 流式输出 SSE 解析"`
+- [x] curl 看懂 SSE 原始报文,能说出 `delta.content` 和 `message.content` 的区别
+- [x] `chatStream()` 实现完成,控制台逐字往外蹦
+- [x] 首尾 chunk(无 content)被安全跳过,全程无 NPE
+- [x] 错误 key 测试:报错信息清晰(状态码 + 服务端原文),不是解析怪异日志
+- [x] 合上文档,能在 25 分钟内重写出「读行流 → 前缀判断 → [DONE] 判空 → onToken」的主流程
+- [x] git 提交:`git add -A && git commit -m "W1D3: chatStream() 流式输出 SSE 解析"`
 
-### Day 4:JSON 结构化提取
+### Day 4:JSON 结构化提取(约 2 小时)
 
-> 需求:输入一段简历文本,输出 `{"name":"","years":0,"skills":[]}`。这是 LLM 在企业里最高频的用法之一。
+**今天解锁 LLM 在企业里最高频的用法**:把非结构化文本变成结构化数据。简历解析、工单分类、日志字段提取……底层全是这一招。目标:输入一段简历文本,稳定输出 `{"name":"","years":0,"skills":[]}`,并搞清楚它什么时候会**一本正经地胡说**。
 
-实现两种方式并对比:
+> 还是只改 `LlmClient.java` + `Main.java`。今天开始感受到:前三天在跟 HTTP/协议搏斗,今天开始跟「模型的不确定性」搏斗——后者才是 AI 应用开发的真正日常。
 
-- [ ] **方式 A(简单)**:system prompt 里写明「只输出 JSON,不要解释」,然后用 Jackson 解析;解析失败重试 1 次
-- [ ] **方式 B(可靠)**:请求体加 `"response_format": {"type": "json_object"}`,对比两者成功率
+#### 4.1 先定义输出结构(15 分钟)
 
-**自测点**:故意输入不是简历的文本(比如一首诗),记录两种方式的行为差异,写进 README(这是你第一个「LLM 不确定性」的体感)。
+Java 的老本行来了——先定 schema 再写逻辑:
 
-### Day 5:测试 + README
+```java
+// 新文件 Resume.java(或用 record)
+public record Resume(String name, int years, List<String> skills) {}
+```
 
-- [ ] 用 `com.sun.net.httpserver.HttpServer`(JDK 自带)起一个假的 LLM 服务,返回固定 JSON,测你的解析逻辑——**不许测真实 API**
-- [ ] README 写清楚:怎么配 key、怎么运行、你观察到了哪些坑
+同时写死「期望的 JSON 形状」(这就是你给模型的契约):
+
+```json
+{"name": "张三", "years": 5, "skills": ["Java", "Spring"]}
+```
+
+#### 4.2 方式 A:纯 Prompt 约束(35 分钟)
+
+在 `LlmClient` 加一个方法,用 prompt 强制输出 JSON:
+
+```java
+public String extractJson(String systemPrompt, String userText) {
+    // 1. 调 chat() 拿回复
+    // 2. mapper.readTree(reply) 解析
+    // 3. 解析失败 → 把「你的输出不是合法 JSON,请重新只输出 JSON」追加进对话重试 1 次
+    // 4. 再失败 → 抛异常,带上原始输出
+}
+```
+
+system prompt 参考(**自己写,写完跟这个对比措辞差异**):
+
+```
+你是一个信息提取器。从用户给出的文本中提取信息,只输出一个 JSON 对象,
+格式: {"name": "姓名", "years": 工作年限整数, "skills": ["技能1", "技能2"]}
+规则:
+1. 不要输出 JSON 以外的任何文字,包括解释和 markdown 代码块标记
+2. 文本中找不到的字段用空字符串/0/空数组,不要编造
+```
+
+`Main` 里准备一段简历测试文本,跑通打印结果,再用 Jackson 把 JSON 反序列化成 `Resume`。
+
+#### 4.3 方式 B:协议级约束(25 分钟)
+
+请求体加一行(和昨天 `stream` 一样,又一个协议开关):
+
+```java
+body.put("response_format", Map.of("type", "json_object"));
+```
+
+对比体会:方式 A 靠「模型听话」,方式 B 靠「服务端保证输出是合法 JSON 语法」——但注意 **B 只保证语法合法,不保证内容不编造**。
+
+> 坑预警:部分兼容服务(DeepSeek 是典型)要求 **prompt 里必须出现 "json" 这个词**才允许 `json_object` 模式,否则报 400。撞上了就明白「兼容协议」的「兼容」两个字值多少钱了。如果你的 4.2 prompt 里有「JSON」字样,大概率不会触发;可以故意删掉试试,见识一下这个 400。
+
+#### 4.4 对抗测试:喂它一首诗(25 分钟,今天的灵魂)
+
+把测试文本换成一首古诗(比如《静夜思》)或一段菜谱,**观察两种方式的行为并记录**:
+
+| 观察项                   | 方式 A | 方式 B |
+| --------------------- | ---- | ---- |
+| 输出是合法 JSON 吗?         | 合法   | 合法   |
+| `name` 字段填了什么?(编造?空?) | 空    | 空    |
+| 它为编造的内容像模像样吗?         | 没有伪造 | 没有伪造 |
+
+把结果写进 README。预期你会发现:**模型宁可瞎编一个 `name: "李白"`,也不愿意留空**——这就是幻觉,这就是为什么 prompt 里要写「找不到用空值,不要编造」,这就是为什么后端永远要校验输出。今天这 25 分钟是你「AI 不确定性」的第一次体感,值得慢慢玩。
+
+#### 4.5 截断防线(15 分钟)
+
+JSON 提取最容易撞上的另一个坑:输出太长被 `max_tokens` 截断 → 尾巴没了 → JSON 不合法。回到 Day 2 表格里的 `finish_reason`:
+
+- [ ] 在 `extractJson` 里检查 `finish_reason`,等于 `"length"` 时直接报「输出被截断」,别让 Jackson 的报错误导你
+- [ ] 测试方法:给一段超长简历文本 + 在请求体里设个小的 `"max_tokens": 50` 人为制造截断
+
+#### 4.6 常见卡点
+
+| 现象                    | 原因 / 解法                                  |
+| --------------------- | ---------------------------------------- |
+| 输出带 ` ```json ` 代码块围栏 | prompt 没约束住。两种解法:prompt 加「不要 markdown 标记」;或解析前把围栏剥掉(记录到代码注释里,这是「兜底」思想) |
+| 偶尔解析失败、偶尔成功           | LLM 的不确定性本性。重试 1 次 + 失败带原始输出抛异常,不要无限重试   |
+| `years` 反序列化报错        | 模型输出了 `"5年"` 这种字符串而不是数字——schema 里明确「整数」,并在反序列化时容忍字符串数字(Jackson 的 `CoercionConfig` 或手动转换) |
+| 方式 B 报 400            | prompt 里没有 "json" 字样(4.3 的坑);或模型不支持 `response_format`(查供应商文档) |
+| 两种方式都稳定输出 JSON,以为搞定了  | 别急,4.4 的诗还没喂呢——「合法」和「正确」是两回事             |
+
+#### 4.7 运行验证 + 打卡
+
+- [ ] 简历文本 → 正确解析成 `Resume` 对象打印
+- [ ] 方式 A 解析失败时重试 1 次,再失败抛出带原始输出的异常
+- [ ] 方式 B 跑通,理解它只保证「语法合法」
+- [ ] 4.4 对抗测试记录完成(表格填满,写进 README)
+- [ ] 截断防线验证:看到「输出被截断」的明确报错
+- [ ] 合上文档,能重写出「prompt 约束 → 解析 → 失败重试 → 截断检查」的流程
+- [ ] git 提交:`git add -A && git commit -m "W1D4: JSON 结构化提取 + 对抗测试"`
+
+### Day 5:测试 + README(约 2 小时)
+
+**今天不写新功能,把这周的成果锁进保险箱。** 目标:用一个假的 LLM 服务把测试跑绿,再把 README 写成别人(包括两周后的你)能跑起来的样子。
+
+#### 5.1 为什么要 mock,绝不测真实 API(10 分钟)
+
+后端的直觉你有,复习一遍搬到 LLM 世界的理由:
+
+- **确定性**:真实模型每次输出都不同,测试会随机红——这不叫测试,叫抽签
+- **免费 + 快**:CI 里跑 100 遍不花钱不超时
+- **能测错误路径**:让真 API 稳定返回 401/429/截断很麻烦,mock 里一行代码的事
+
+原则一句话:**单元测试测的是「你的解析/循环写对没」,不是「模型聪不聪明」。** 模型质量是第 8 周评估体系的活。
+
+#### 5.2 写 FakeLlmServer(45 分钟)
+
+用 JDK 自带的 `com.sun.net.httpserver.HttpServer`,**不许引 mock 框架**——正好练手写桩服务:
+
+```java
+package com.example.llm;
+
+import com.sun.net.httpserver.HttpServer;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+
+public class FakeLlmServer {
+
+    private final HttpServer server;
+    public int port;   // 启动后填上,测试里拼 baseUrl 用
+
+    public FakeLlmServer() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);  // 0 = 随机端口
+        server.createContext("/v1/chat/completions", exchange -> {
+            // TODO 1: 读出请求体打印(方便断言你的客户端发的 JSON 对不对)
+            // TODO 2: 提供「场景开关」——按请求体内容或固定脚本返回不同响应:
+            //   场景 a: 正常响应 —— 标准 chat.completion JSON,content 固定为 "你好,我是假模型"
+            //   场景 b: 错误响应 —— 状态码 401,body 为 {"error":{"message":"invalid api key"}}
+            //   场景 c: 流式响应 —— Content-Type: text/event-stream,输出几行
+            //         data: {"choices":[{"delta":{"content":"你"}}]}
+            //         data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+            //         data: [DONE]
+        });
+    }
+
+    public void start() { server.start(); port = server.getAddress().getPort(); }
+    public void stop()  { server.stop(0); }
+}
+```
+
+> 实现提示:场景开关最简单的做法是**看请求体里有没有某个关键词**——比如用户消息含 "TRIGGER_401" 就返回 401,含 "TRIGGER_STREAM" 就走流式。这样测试用例就是「传不同的输入」,不用改桩代码。
+
+#### 5.3 写 3 个单元测试(40 分钟)
+
+`src/test/java/com/example/llm/LlmClientTest.java`,JUnit 5:
+
+```java
+class LlmClientTest {
+
+    static FakeLlmServer fake;          // @BeforeAll 启动,@AfterAll 停止
+    static LlmClient client;            // baseUrl 指向 http://localhost:{port}/v1
+
+    // 测试 1:正常响应能解析出 content
+    //   断言:chat() 返回值 == "你好,我是假模型"
+    //   —— 证明「组装请求 + 解析 choices[0].message.content」写对了
+
+    // 测试 2:错误响应能抛出带服务端原文的异常
+    //   断言:异常 message 含 "401" 和 "invalid api key"
+    //   —— 锁住 Day 2 的错误处理质量,防止以后重构把它改丢
+
+    // 测试 3:流式响应能正确拼接、能跳过无 content 的 chunk
+    //   断言:onToken 收到的拼接结果 == 预期文本;无 NPE
+    //   —— 锁住 Day 3 的判空逻辑
+}
+```
+
+**每个测试自己写完整**,包括 `@BeforeAll` 的启动和 `@AfterAll` 的 `stop()`(端口不释放,IDEA 里跑两次就撞了——这个坑配额一次)。
+
+跑测试:
+
+```bash
+mvn test
+```
+
+期望:`Tests run: 3, Failures: 0, Errors: 0`。
+
+#### 5.4 写 README(25 分钟)
+
+按这个骨架写(这是作品集的门面,简历筛选时真的有人点开看):
+
+```markdown
+# lab01-llm-client — 裸调 LLM API 练手
+
+一个不依赖任何 AI 框架的 Java LLM 客户端:同步调用 / SSE 流式 / JSON 结构化提取。
+
+## 快速开始
+- 环境要求:JDK 17+,环境变量 LLM_API_KEY
+- 配置:application.properties(baseUrl/model)
+- 运行:Main 的三种模式(普通对话 / 流式 / 提取)
+
+## 我实现了什么
+- chat():OpenAI 兼容协议同步调用,含错误处理(状态码表)
+- chatStream():SSE 解析,判空跳过首尾 chunk
+- extractJson():JSON 提取 + 失败重试 + 截断检查
+
+## 测试
+- FakeLlmServer(JDK HttpServer 手写桩服务)驱动 3 个单测,mvn test 全绿
+
+## 踩坑记录(从「常见卡点」表里挑印象最深的 5 条)
+1. ...
+
+## LLM 不确定性观察(Day 4 对抗测试的发现)
+- 喂诗时的表现:...
+```
+
+#### 5.5 第 1 周收尾自检(20 分钟)
+
+对照 0 节铁律做周自检,**诚实回答**:
+
+- [ ] 合上文档,`chatStream()` 的主流程(读行 → 前缀 → [DONE] → 判空 → onToken)能不能徒手写出来?
+- [ ] `delta.content` 和 `message.content` 的区别,能不能一句话讲给同事听?
+- [ ] 这周有没有哪段代码是复制粘贴的?有就删掉重打一遍
+- [ ] README 让一个新同事能跑起来吗?
+
+**Day 5 打卡项**:
+
+- [ ] FakeLlmServer 三种场景(正常/401/流式)可用
+- [ ] 3 个单测全部通过,且**故意改坏一处解析逻辑能变红**(验证测试有效)
+- [ ] README 按 5.4 骨架写完
+- [ ] 第 1 周自检 4 条全部诚实过关
+- [ ] git 提交:`git add -A && git commit -m "W1D5: FakeLlmServer + 单元测试 + README"`
+- [ ] 进度日志填第 1 周一行
 
 ### 🐍 Python 对照(第 2 周周末,2 小时)
 
