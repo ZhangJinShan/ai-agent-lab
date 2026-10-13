@@ -2,6 +2,7 @@ package com.example.llm;
 
 import java.io.InputStream;
 import java.util.Properties;
+import java.util.function.Consumer;
 
 /**
  * @author zhangjinshan
@@ -34,14 +35,22 @@ public class Main {
         LlmClient llmClient = new LlmClient(properties.getProperty("llm.baseUrl"), properties.getProperty("llm.model"), apiKey);
 
         // 4. 打印验证(baseUrl 打印出来没问题,apiKey 千万不要打印!)
-        System.out.println("配置加载成功!");
-        System.out.println("  baseUrl = " + properties.getProperty("llm.baseUrl"));
-        System.out.println("  model   = " + properties.getProperty("llm.model"));
-        System.out.println("  apiKey  = 已加载(" + apiKey.length() + " 个字符)");
+//        System.out.println("配置加载成功!");
+//        System.out.println("  baseUrl = " + properties.getProperty("llm.baseUrl"));
+//        System.out.println("  model   = " + properties.getProperty("llm.model"));
+//        System.out.println("  apiKey  = 已加载(" + apiKey.length() + " 个字符)");
+
+        String systemPrompt = "你是一个简洁的助手";
+
+        String userMessage = "你好,请用一句话介绍你自己";
 
 
-//        String answer = llmClient.chat("你是一个简洁的助手", "你好,请用一句话介绍你自己");
-//
-//        System.out.println("模型回复: " + answer);
+        String answer = llmClient.chat("你是一个简洁的助手", "你好,请用一句话介绍你自己");
+
+        System.out.println("模型回复: " + answer);
+
+        System.out.println("***************************************");
+
+        llmClient.chatStream(systemPrompt, userMessage, System.out::println);
     }
 }
