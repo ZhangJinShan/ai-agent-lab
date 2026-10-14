@@ -816,8 +816,8 @@ if ("length".equals(finishReason)) {
 
 **为什么这 15 分钟值得花**:这是「**错误分类**」的工程思维——同一个下游症状(解析失败),上游原因可能完全不同(格式错 vs 截断 vs 服务端抽风),处理方式也完全不同(重试有用 / 重试没用 / 等一会)。第 4 周做重试策略时你会再遇到它:**截断是不该重试的错误**,这周先把识别能力练出来。
 
-- [ ] 在 `extractJson` 里检查 `finish_reason`,等于 `"length"` 时直接报「输出被截断」,别让 Jackson 的报错误导你
-- [ ] 测试方法:给一段超长简历文本 + 在请求体里设个小的 `"max_tokens": 50` 人为制造截断
+- [x] 在 `extractJson` 里检查 `finish_reason`,等于 `"length"` 时直接报「输出被截断」,别让 Jackson 的报错误导你
+- [x] 测试方法:给一段超长简历文本 + 在请求体里设个小的 `"max_tokens": 50` 人为制造截断
 
 #### 4.6 常见卡点
 
@@ -831,13 +831,13 @@ if ("length".equals(finishReason)) {
 
 #### 4.7 运行验证 + 打卡
 
-- [ ] 简历文本 → 正确解析成 `Resume` 对象打印
-- [ ] 方式 A 解析失败时重试 1 次,再失败抛出带原始输出的异常
-- [ ] 方式 B 跑通,理解它只保证「语法合法」
-- [ ] 4.4 对抗测试记录完成(表格填满,写进 README)
-- [ ] 截断防线验证:看到「输出被截断」的明确报错
-- [ ] 合上文档,能重写出「prompt 约束 → 解析 → 失败重试 → 截断检查」的流程
-- [ ] git 提交:`git add -A && git commit -m "W1D4: JSON 结构化提取 + 对抗测试"`
+- [x] 简历文本 → 正确解析成 `Resume` 对象打印
+- [x] 方式 A 解析失败时重试 1 次,再失败抛出带原始输出的异常
+- [x] 方式 B 跑通,理解它只保证「语法合法」
+- [x] 4.4 对抗测试记录完成(表格填满,写进 README)
+- [x] 截断防线验证:看到「输出被截断」的明确报错
+- [x] 合上文档,能重写出「prompt 约束 → 解析 → 失败重试 → 截断检查」的流程
+- [x] git 提交:`git add -A && git commit -m "W1D4: JSON 结构化提取 + 对抗测试"`
 
 ### Day 5:测试 + README(约 2 小时)
 
@@ -855,7 +855,29 @@ if ("length".equals(finishReason)) {
 
 #### 5.2 写 FakeLlmServer(45 分钟)
 
-用 JDK 自带的 `com.sun.net.httpserver.HttpServer`,**不许引 mock 框架**——正好练手写桩服务:
+**先搞清楚今天在干什么**(卡住的人都卡在这):前三天你是「客户端」——发请求、解析别人的响应;今天反过来,你要**扮演服务器**:起一个本地 HTTP 服务,收到请求后按剧本返回假响应。测试跑起来时的世界是这样的:
+
+```
+LlmClientTest(测试代码)
+    │ ① 起 FakeLlmServer(假服务器,监听随机端口)
+    │ ② new LlmClient("http://localhost:{port}/v1", ...) —— 打的是假服务器!
+    │ ③ 调 client.chat(...) / chatStream(...)
+    ▼
+FakeLlmServer 收到请求 → 看关键词决定剧本 → 返回正常 JSON / 401 / SSE 流
+    ▲
+    │ ④ 测试断言:client 处理这个剧本的行为对不对
+```
+
+**所以只有两个新文件**:`FakeLlmServer.java`(假服务器)+ `LlmClientTest.java`(3 个测试)。你的 `LlmClient` 一行都不用改。
+
+用 JDK 自带的 `com.sun.net.httpserver.HttpServer`,**不许引 mock 框架**——正好练手写桩服务。先记住这个 API 的 4 个事实(背下来,总共就这么多):
+
+1. `HttpServer.create(new InetSocketAddress(0), 0)` —— 端口传 `0` 表示随机空闲端口,启动后用 `server.getAddress().getPort()` 拿到实际端口号
+2. `server.createContext("/路径", handler)` —— 注册处理函数,路径必须和你客户端拼的 URL 对上:`baseUrl` 是 `http://localhost:{port}/v1`,客户端拼 `/chat/completions`,所以 context 路径是 **`/v1/chat/completions`**
+3. handler 里读请求体:`new String(exchange.getRequestBody().readAllBytes(), UTF_8)`
+4. handler 里写响应的顺序固定:**先 `sendResponseHeaders(状态码, 字节数)`,再写 body,最后 `exchange.close()`**。字节数传 `0` 表示 chunked 传输(流式场景用它)
+
+骨架如下,**TODO 处必须自己填**:
 
 ```java
 package com.example.llm;
@@ -891,29 +913,133 @@ public class FakeLlmServer {
 
 > 实现提示:场景开关最简单的做法是**看请求体里有没有某个关键词**——比如用户消息含 "TRIGGER_401" 就返回 401,含 "TRIGGER_STREAM" 就走流式。这样测试用例就是「传不同的输入」,不用改桩代码。
 
+三个场景的写法提示(响应体可以先抄 Day 2/Day 3 见过的真实报文,把 content 换成假文本):
+
+- **场景 a(正常)**:`Content-Type: application/json`,状态码 200,body 是标准 `chat.completion` JSON,`content` 固定为 `"你好,我是假模型"`。注意你的 `chat()` 会解析 `choices[0].message.content`,这个路径必须存在
+- **场景 b(401)**:状态码 401,body 为 `{"error":{"message":"invalid api key"}}`——你的客户端错误处理要求异常里带状态码和这段原文,测试就断言它俩
+- **场景 c(流式)**:响应头 `Content-Type: text/event-stream`,`sendResponseHeaders(200, 0)`,然后往 `exchange.getResponseBody()` 逐行写:
+  ```
+  data: {"choices":[{"delta":{"content":"你"}}]}
+
+  data: {"choices":[{"delta":{"content":"好"}}]}
+
+  data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+  data: [DONE]
+  ```
+  注意行与行之间有**空行**(SSE 标准),每行以 `data: ` 开头。故意留一个没有 content 的 chunk(`finish_reason` 那行),就是给测试 3 验证「判空跳过」用的
+
+**关键顺序:先用 curl 打你自己写的假服务器,绿了再写测试!**(15 分钟,延续 Day 2/3 的肌肉记忆)
+
+```bash
+# 另开一个终端:临时写个 main 或测试起动 FakeLlmServer,然后:
+curl -s http://localhost:{port}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"fake","messages":[{"role":"user","content":"TRIGGER_401"}]}'
+# 期望:HTTP 401 + invalid api key
+```
+
+三个剧本各自 curl 一遍都符合预期,再进 5.3。**这一步能把「假服务器写错了」和「客户端写错了」分开**——不然测试红了你不知道该查哪边。
+
 #### 5.3 写 3 个单元测试(40 分钟)
 
-`src/test/java/com/example/llm/LlmClientTest.java`,JUnit 5:
+`src/test/java/com/example/llm/LlmClientTest.java`,JUnit 5。测试执行顺序:**每个测试方法都是「用不同输入触发假服务器的不同剧本,断言客户端的行为」**。骨架如下,断言部分自己填:
 
 ```java
+package com.example.llm;
+
+import org.junit.jupiter.api.*;
+import static org.junit.jupiter.api.Assertions.*;
+
 class LlmClientTest {
 
-    static FakeLlmServer fake;          // @BeforeAll 启动,@AfterAll 停止
-    static LlmClient client;            // baseUrl 指向 http://localhost:{port}/v1
+    static FakeLlmServer fake;
+    static LlmClient client;
 
-    // 测试 1:正常响应能解析出 content
-    //   断言:chat() 返回值 == "你好,我是假模型"
-    //   —— 证明「组装请求 + 解析 choices[0].message.content」写对了
+    @BeforeAll   // 整个测试类只跑一次:起假服务器 + 构造指向它的 client
+    static void setUp() throws Exception {
+        fake = new FakeLlmServer();
+        fake.start();
+        client = new LlmClient(
+                "http://localhost:" + fake.port + "/v1",   // baseUrl 指向假服务器!
+                "test-key",                                 // 假服务器不校验,随便填非空即可
+                "fake-model");
+    }
 
-    // 测试 2:错误响应能抛出带服务端原文的异常
-    //   断言:异常 message 含 "401" 和 "invalid api key"
-    //   —— 锁住 Day 2 的错误处理质量,防止以后重构把它改丢
+    @AfterAll    // 整个测试类跑完:必须停掉,否则端口被占,IDEA 里跑第二次就撞
+    static void tearDown() {
+        fake.stop();
+    }
 
-    // 测试 3:流式响应能正确拼接、能跳过无 content 的 chunk
-    //   断言:onToken 收到的拼接结果 == 预期文本;无 NPE
-    //   —— 锁住 Day 3 的判空逻辑
+    @Test
+    void 测试1_正常响应解析出content() {
+        // 调 client.chat("你是测试助手", "hello") —— 不带任何 TRIGGER 关键词,走场景 a
+        // TODO: 断言返回值 == "你好,我是假模型"
+    }
+
+    @Test
+    void 测试2_错误响应抛出带原文的异常() {
+        // 调 chat() 时用户消息里带 "TRIGGER_401",走场景 b
+        // TODO: 用 assertThrows 捕获 RuntimeException,
+        //       断言异常 message 同时含 "401" 和 "invalid api key"
+    }
+
+    @Test
+    void 测试3_流式拼接且跳过无content的chunk() {
+        // 调 chatStream() 时用户消息里带 "TRIGGER_STREAM",走场景 c
+        // TODO: 用 StringBuilder::append 当 onToken,拼接结果应 == "你好"
+        //       —— 若首尾 chunk 没被跳过,这里会 NPE 或多出 null 字符串
+    }
 }
 ```
+
+> 关键认知:**测试打的是假服务器,不是真实 API**——`LLM_API_KEY` 环境变量没配也能跑,`mvn test` 离线可跑。这就是 5.1 说的「确定性」。
+
+##### 5.3.1 断言写法详解(没写过测试的人看这节)
+
+先分清两个词:**「捕获」是把异常接住别让它乱飞,「断言」是检查「实际结果 == 预期」,不成立就让测试红**。测试里每个 `@Test` 方法必须至少有一条断言,没有断言的测试是「假绿」——跑完显示通过,但什么都没检查,比红更危险。
+
+错误写法(初学常见):`try { chat(...) } catch (Exception e) { throw new RuntimeException(e); }`
+——异常被重新抛出,JUnit 当成测试失败(红得不对);若把异常吞掉,`chat()` 压根不抛异常时测试还会静默通过(假绿)。**捕获异常本身不是断言。**
+
+JUnit 5 的断言 API 总共就 3 个事实(背下来):
+
+| API | 用途 | 语义 |
+| --- | --- | --- |
+| `assertEquals(期望值, 实际值)` | 两个值相等 | 不等 → 测试红,打印两边差异 |
+| `assertTrue(条件)` | 条件为 true | 不满足 → 测试红 |
+| `assertThrows(异常类, 代码)` | 代码**必须**抛出该异常 | 不抛 → 测试红;抛了 → **把异常返回给你继续检查** |
+
+`assertThrows` 的返回值就是捕获到的异常对象——拿它的 `getMessage()` 继续 `assertTrue` 检查内容,这就是「预期它抛,且抛得对」。
+
+**测试 2(错误响应)的落法**,`assertThrows` 骨架如下,断言两条自己写:
+
+```java
+@Test
+void 测试2_错误响应抛出带原文的异常() {
+    // 1. TODO: 用 assertThrows(RuntimeException.class, () -> llmClient.chat("你是测试助手", "TRIGGER_401"))
+    //    把返回的异常接住:RuntimeException ex = ...
+    // 2. TODO: assertTrue 断言 ex.getMessage() 含 "401"
+    // 3. TODO: assertTrue 断言 ex.getMessage() 含 "invalid api key"
+}
+```
+
+**测试 1 两处要修**(它现在是假绿:调了 `chat()` 但没断言):
+
+```java
+@Test
+void 测试1_正常响应解析出content() {
+    // 1. TODO: 接住返回值:String answer = llmClient.chat("你是测试助手", "hello");
+    // 2. TODO: assertEquals("你好,我是假模型", answer);
+}
+```
+
+> 同时修 `setUp()` 里的参数顺序:`LlmClient` 的签名是 `(baseUrl, model, apiKey)`,现在 `"test-key"`(apiKey)传到了 model 的位置上——换成 `("http://localhost:" + fake.port + "/v1", "fake-model", "test-key")`。判别方法:跑一次测试看打印的请求体里 `"model"` 字段是哪个值。
+
+写完的验证顺序:
+
+1. `mvn test` 三个全绿(测试 3 可以先 `@Disabled` 或等场景 c)
+2. **故意改坏一处逻辑看它变红**(打卡项):比如把 `LlmClient` 解析路径 `choices[0].message.content` 临时改成 `choices[0].message.contents`,跑测试 → 必须红 → 改回来 → 绿。红不了说明断言是假的
 
 **每个测试自己写完整**,包括 `@BeforeAll` 的启动和 `@AfterAll` 的 `stop()`(端口不释放,IDEA 里跑两次就撞了——这个坑配额一次)。
 
@@ -958,19 +1084,19 @@ mvn test
 
 对照 0 节铁律做周自检,**诚实回答**:
 
-- [ ] 合上文档,`chatStream()` 的主流程(读行 → 前缀 → [DONE] → 判空 → onToken)能不能徒手写出来?
-- [ ] `delta.content` 和 `message.content` 的区别,能不能一句话讲给同事听?
-- [ ] 这周有没有哪段代码是复制粘贴的?有就删掉重打一遍
-- [ ] README 让一个新同事能跑起来吗?
+- [x] 合上文档,`chatStream()` 的主流程(读行 → 前缀 → [DONE] → 判空 → onToken)能不能徒手写出来?
+- [x] `delta.content` 和 `message.content` 的区别,能不能一句话讲给同事听?
+- [x] 这周有没有哪段代码是复制粘贴的?有就删掉重打一遍
+- [x] README 让一个新同事能跑起来吗?
 
 **Day 5 打卡项**:
 
-- [ ] FakeLlmServer 三种场景(正常/401/流式)可用
-- [ ] 3 个单测全部通过,且**故意改坏一处解析逻辑能变红**(验证测试有效)
-- [ ] README 按 5.4 骨架写完
-- [ ] 第 1 周自检 4 条全部诚实过关
-- [ ] git 提交:`git add -A && git commit -m "W1D5: FakeLlmServer + 单元测试 + README"`
-- [ ] 进度日志填第 1 周一行
+- [x] FakeLlmServer 三种场景(正常/401/流式)可用
+- [x] 3 个单测全部通过,且**故意改坏一处解析逻辑能变红**(验证测试有效)
+- [x] README 按 5.4 骨架写完
+- [x] 第 1 周自检 4 条全部诚实过关
+- [x] git 提交:`git add -A && git commit -m "W1D5: FakeLlmServer + 单元测试 + README"`
+- [x] 进度日志填第 1 周一行
 
 ### 🐍 Python 对照(第 2 周周末,2 小时)
 
