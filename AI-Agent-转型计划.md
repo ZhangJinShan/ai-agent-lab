@@ -772,9 +772,49 @@ body.put("response_format", Map.of("type", "json_object"));
 
 把结果写进 README。预期你会发现:**模型宁可瞎编一个 `name: "李白"`,也不愿意留空**——这就是幻觉,这就是为什么 prompt 里要写「找不到用空值,不要编造」,这就是为什么后端永远要校验输出。今天这 25 分钟是你「AI 不确定性」的第一次体感,值得慢慢玩。
 
+> 实际上可能现在的模型比较聪明了，运行过程中并没有发现这个问题...
+
 #### 4.5 截断防线(15 分钟)
 
-JSON 提取最容易撞上的另一个坑:输出太长被 `max_tokens` 截断 → 尾巴没了 → JSON 不合法。回到 Day 2 表格里的 `finish_reason`:
+JSON 提取最容易撞上的另一个坑:输出太长被 `max_tokens` 截断 → 尾巴没了 → JSON 不合法。回到 Day 2 表格里的 `finish_reason`。
+
+**问题背景**:LLM 每次回复有个 token 上限(请求体里的 `max_tokens`)。如果模型生成到一半撞上这个上限:
+
+1. 输出的 JSON **尾巴没了**,比如 `{"name": "张三", "years": 5, "skills": ["Java", "Spri`
+2. 拿这坨残缺文本去 `mapper.readTree()` → 报 JSON 解析错误
+3. **误导点**:Jackson 报的是「JSON 语法错误」,你会以为是模型没听话输出了非 JSON,于是去改 prompt、加重试——全白费力气。真实原因是「被截断了」,重试多少次都没用(同样的输入 + 同样的 max_tokens,还是截断)
+
+核心思想:**在解析之前,先看响应里的 `finish_reason`,把「截断」和「格式错误」区分开,报错信息要说人话。**
+
+| `finish_reason` | 含义 |
+| --- | --- |
+| `"stop"` | 正常说完了 ✅ |
+| `"length"` | 撞上 max_tokens 被截断 ⚠️ ← 4.5 要抓的就是它 |
+
+**第 1 步:在解析前检查 `finish_reason`**
+
+在 `parseChatResponse()`(或等价位置)里,`readTree` 之后、解析 `Resume` 之前,顺手取 `choices[0].finish_reason`:
+
+```java
+JsonNode root = mapper.readTree(response.body());
+String finishReason = root.path("choices").path(0).path("finish_reason").asText();
+if ("length".equals(finishReason)) {
+    throw new RuntimeException("输出被 max_tokens 截断,JSON 不完整,请调大 max_tokens 或缩短输入");
+}
+// 再走你现有的 content 提取 + Resume 解析
+```
+
+> 注意两点:① 检查必须在 Jackson 解析 Resume **之前**,目的是不让「截断」被伪装成「JSON 语法错误」;② `extractJson`(方式 A)和 `chatExtractJson`(方式 B)两条路径**都要加**——方式 B 直接 `readValue`,同样会中招。
+
+**第 2 步:人为制造一次截断来验证(不验证等于没写)**
+
+1. 在请求体里加一行 `"max_tokens": 50`(可以临时写在 `buildBody` 里)
+2. 喂一段**超长简历文本**(几千字,确保 50 token 根本装不下输出)
+3. 跑 `extractJson`
+
+**验收标准**:看到的报错是明确的「输出被截断」,而不是 Jackson 的 `Unexpected end-of-input` 之类的天书。看到明确报错 → 本小节完成。
+
+**为什么这 15 分钟值得花**:这是「**错误分类**」的工程思维——同一个下游症状(解析失败),上游原因可能完全不同(格式错 vs 截断 vs 服务端抽风),处理方式也完全不同(重试有用 / 重试没用 / 等一会)。第 4 周做重试策略时你会再遇到它:**截断是不该重试的错误**,这周先把识别能力练出来。
 
 - [ ] 在 `extractJson` 里检查 `finish_reason`,等于 `"length"` 时直接报「输出被截断」,别让 Jackson 的报错误导你
 - [ ] 测试方法:给一段超长简历文本 + 在请求体里设个小的 `"max_tokens": 50` 人为制造截断

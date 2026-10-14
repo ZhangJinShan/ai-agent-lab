@@ -123,6 +123,7 @@ public class LlmClient {
     public Resume chatExtractJson(String systemPrompt, String userText){
         Map<String, Object> body = buildBody(systemPrompt, userText, false);
         body.put("response_format", Map.of("type", "json_object"));
+        body.put("max_tokens", 50);
         try {
             HttpRequest httpRequest = getHttpRequest(body);
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
@@ -137,7 +138,12 @@ public class LlmClient {
         if (response.statusCode() != 200) {
             throwLlmError(response.statusCode(), response.body());
         }
-        String content = extractChoiceContent(mapper.readTree(response.body()), "message");
+        JsonNode root = mapper.readTree(response.body());
+        String finishReason = root.path("choices").path(0).path("finish_reason").asText();
+        if ("length".equals(finishReason)) {
+            throw new RuntimeException("输出被 max_tokens 截断,JSON 不完整,请调大 max_tokens 或缩短输入");
+        }
+        String content = extractChoiceContent(root, "message");
         if (content == null || content.isEmpty()) {
             throw new RuntimeException("响应里没有 content,原始响应: " + response.body());
         }
