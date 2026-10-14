@@ -786,10 +786,10 @@ JSON 提取最容易撞上的另一个坑:输出太长被 `max_tokens` 截断 �
 
 核心思想:**在解析之前,先看响应里的 `finish_reason`,把「截断」和「格式错误」区分开,报错信息要说人话。**
 
-| `finish_reason` | 含义 |
-| --- | --- |
-| `"stop"` | 正常说完了 ✅ |
-| `"length"` | 撞上 max_tokens 被截断 ⚠️ ← 4.5 要抓的就是它 |
+| `finish_reason` | 含义                                |
+| --------------- | --------------------------------- |
+| `"stop"`        | 正常说完了 ✅                           |
+| `"length"`      | 撞上 max_tokens 被截断 ⚠️ ← 4.5 要抓的就是它 |
 
 **第 1 步:在解析前检查 `finish_reason`**
 
@@ -1004,11 +1004,11 @@ class LlmClientTest {
 
 JUnit 5 的断言 API 总共就 3 个事实(背下来):
 
-| API | 用途 | 语义 |
-| --- | --- | --- |
-| `assertEquals(期望值, 实际值)` | 两个值相等 | 不等 → 测试红,打印两边差异 |
-| `assertTrue(条件)` | 条件为 true | 不满足 → 测试红 |
-| `assertThrows(异常类, 代码)` | 代码**必须**抛出该异常 | 不抛 → 测试红;抛了 → **把异常返回给你继续检查** |
+| API                      | 用途            | 语义                            |
+| ------------------------ | ------------- | ----------------------------- |
+| `assertEquals(期望值, 实际值)` | 两个值相等         | 不等 → 测试红,打印两边差异               |
+| `assertTrue(条件)`         | 条件为 true      | 不满足 → 测试红                     |
+| `assertThrows(异常类, 代码)`  | 代码**必须**抛出该异常 | 不抛 → 测试红;抛了 → **把异常返回给你继续检查** |
 
 `assertThrows` 的返回值就是捕获到的异常对象——拿它的 `getMessage()` 继续 `assertTrue` 检查内容,这就是「预期它抛,且抛得对」。
 
@@ -1117,6 +1117,8 @@ print(resp.choices[0].message.content)
 
 ## 第 2 周:手写 Tool Use 循环(本周是整个转型最重要的一周)
 
+**本周成果**:`lab02-tool-loop` 模块 —— 一个能自主「查天气 → 对比 → 回答」的最小 Agent。写完这周,你就有底气在面试里说「我手写过 Agent 内核」;后面学 Spring AI / LangGraph,你会发现它们的源码只是在复述你这周写的东西。
+
 ### 今天要干什么
 
 - [ ] **Day 1**:理解 function calling 的 JSON 协议(画出消息流转图)
@@ -1125,29 +1127,280 @@ print(resp.choices[0].message.content)
 - [ ] **Day 4**:接入 2 个真实工具 + 异常处理
 - [ ] **Day 5**:CLI 演示 + 消息流转日志
 
-### Day 1:先画图,再写代码
+**本周工程结构**(Day 2 建,先有个印象):
 
-**Function Calling 的完整协议流转**(自己在纸上画一遍,画完对照下面):
+```
+ai-agent-lab/
+└── lab02-tool-loop/                      ← 本周新模块
+    ├── pom.xml                           ← 和 lab01 同款依赖(依然不许引框架)
+    └── src/
+        ├── main/java/com/example/agent/
+        │   ├── LlmClient.java            ← 从 lab01 复制并升级(支持 messages 列表 + tools)
+        │   ├── Tool.java                 ← Day 2:工具抽象
+        │   ├── ToolRegistry.java         ← Day 2:注册表 + tools JSON 生成
+        │   ├── ToolCall.java             ← Day 3:解析出的单个工具调用
+        │   ├── AssistantTurn.java        ← Day 3:一轮助手回复(content + toolCalls)
+        │   ├── Agent.java                ← Day 3:核心循环 run(),本周的心脏
+        │   ├── tools/GetWeatherTool.java ← Day 4(也可以先写成 Registry 里的匿名类)
+        │   ├── tools/CalculateTool.java  ← Day 4:安全计算器
+        │   └── Main.java                 ← Day 5:CLI 演示
+        └── test/java/com/example/agent/  ← 可选用 FakeLlmServer 思路补测试
+```
+
+> 为什么新开 lab02,不在 lab01 上直接加?——lab01 是「裸调 API」的完整作品,保持它独立可运行(简历上是两个作品,不是一个大杂烩)。`LlmClient` 是你自己写的代码,复制过来升级是**复用**,不是抄作业。
+
+---
+
+### Day 1:先画图,再写代码(约 1.5 小时)
+
+**今天几乎不写 Java。** 目标只有一个:用 curl 看懂 function calling 的原始报文,并在纸上画出完整的消息流转图。这张图是本周所有代码的「施工图纸」——图画不明白,后面写循环必然糊涂。
+
+#### 1.1 先 curl 打一发:带 tools 声明的请求(30 分钟)
+
+延续第 1 周的肌肉记忆:先看报文,再写 Java。和上周唯一的区别是请求体里多了一个 `tools` 字段:
+
+```bash
+curl https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LLM_API_KEY" \
+  -d '{
+    "model": "glm-5.3",
+    "messages": [
+      {"role": "user", "content": "北京今天天气怎么样?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "查询指定城市的当前天气",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {"type": "string", "description": "城市名,如:北京"}
+            },
+            "required": ["city"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+看清楚响应(和上周最大的不同:**它没有回答问题,而是反问你要数据**):
+
+```json
+{
+  "choices": [{
+		"index": 0,
+		"message": {
+			"role": "assistant",
+			"reasoning_content": "The user is asking about the weather in Beijing today. I should use the get_weather function to query the current weather in Beijing.",
+			"content": "",
+			"tool_calls": [{
+				"id": "call_23434694047f42189f2ffb1c",
+				"type": "function",
+				"function": {
+					"name": "get_weather",
+					"arguments": "{\"city\": \"北京\"}"
+				},
+				"index": 0
+			}]
+		},
+		"finish_reason": "tool_calls",
+		"logprobs": null
+	}],
+  "usage": { "...": "略" }
+}
+```
+
+#### 1.2 再 curl 第二发:把工具结果喂回去(20 分钟)
+
+把上一步模型返回的 `tool_calls` **原样**塞回 messages,追加一条 `role: "tool"` 的结果消息,再发一次:
+
+```json
+curl https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LLM_API_KEY" \
+  -d '{
+    "model": "glm-5.3",
+    "messages": [
+      {"role": "user", "content": "北京今天天气怎么样?"},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{
+          "id": "call_23434694047f42189f2ffb1c",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"北京\"}"
+          }
+        }]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_23434694047f42189f2ffb1c",
+        "content": "晴,25°C"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "查询指定城市的当前天气",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {"type": "string", "description": "城市名,如:北京"}
+            },
+            "required": ["city"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+这次响应里 `finish_reason` 是 `"stop"`,`content` 是「北京今天晴,25°C」
+
+``` Json
+{
+	"id": "chatcmpl-155ea169-fcd1-90f1-97fd-81362ae4a491",
+	"object": "chat.completion",
+	"created": 1791991480,
+	"model": "glm-5.3",
+	"choices": [{
+		"index": 0,
+		"message": {
+			"role": "assistant",
+			"reasoning_content": "The weather tool returned: 晴 (sunny), 25°C. I should tell the user the weather in Beijing today.",
+			"content": "北京今天天气不错!当前天气情况:\n\n- **天气**:晴 ☀️\n- **气温**:25°C\n\n天气晴朗,气温舒适,很适合外出活动。出门记得做好防晒哦!"
+		},
+		"finish_reason": "stop",
+		"logprobs": null
+	}],
+	"usage": {
+		"prompt_tokens": 190,
+		"total_tokens": 260,
+		"completion_tokens": 70,
+		"prompt_tokens_details": {
+			"cached_tokens": 0
+		},
+		"completion_tokens_details": {
+			"reasoning_tokens": 27
+		}
+	}
+}
+```
+
+——这才是最终答案。**两发 curl 走完,你已经手工完成了整个 tool use 协议**,接下来只是把它写成 Java。
+
+#### 1.3 五个必须看懂的协议事实(背下来,本周天天用)
+
+| 路径 / 规则                           | 含义                 | 坑                                        |
+| --------------------------------- | ------------------ | ---------------------------------------- |
+| `message.tool_calls[]`            | 模型的工具请求列表          | 有 tool_calls 时 `content` 是 **null**——上周解析 content 的肌肉记忆在这里 100% NPE |
+| `tool_calls[].id`                 | 本次调用的唯一 id         | 后续 `role=tool` 消息必须用 `tool_call_id` 对上它,对不上服务端直接 400 |
+| `tool_calls[].function.name`      | 工具名                | 模型可能**编造不存在的名字**,必须兜住                    |
+| `tool_calls[].function.arguments` | **JSON 字符串,不是对象!** | 第一次写的人 100% 在这栽跟头,栽了就记住它                 |
+| `finish_reason: "tool_calls"`     | 这轮不是最终答案           | 等于 `"tool_calls"` 时必须执行工具并继续循环           |
+
+外加两条消息规则(协议红线,违反了服务端报错):
+
+1. **assistant 消息(含 tool_calls)必须原样追加回 messages**——不是可选项,是协议要求
+2. **每个 tool_calls 对应一条 `role=tool` 消息**,`tool_call_id` + `content`(工具结果文本,哪怕出错也要回文本)
+
+#### 1.4 画消息流转图(30 分钟,今天的主交付)
+
+**在纸上画一遍**,画完再对照下面:
 
 ```
 你 → [system + user + tools 声明] → LLM
-LLLM → "我要调用 get_weather(city='北京')"(tool_calls,带 id) → 你
+LLM → "我要调用 get_weather(city='北京')"(tool_calls,带 id)→ 你
 你  → 本地执行 get_weather,得到 "晴,25°C"
-你  → [追加 {"role":"tool","tool_call_id":id,"content":"晴,25°C"}] → LLM
-LLM → "北京今天晴,25°C"(最终答案,不再有 tool_calls)
+你  → [追加 assistant(含 tool_calls 原样) + {"role":"tool","tool_call_id":id,"content":"晴,25°C"}] → LLM
+LLM → "北京今天晴,25°C"(最终答案,finish_reason=stop)
 ```
 
-**关键认知**:LLM 不执行任何工具!它只是说「请帮我调这个函数,参数是这些」。执行和喂回都是你的代码的事。
+**关键认知(写进笔记,面试原话)**:LLM 不执行任何工具!它只是说「请帮我调这个函数,参数是这些」。执行和喂回都是你的代码的事——这就是「Agent 循环」的全部秘密:一个 while 循环 + 一份不断变长的消息列表。
 
-### Day 2–3 核心代码
+思考题:如果模型一次返回 **两个** tool_calls(比如同时查北京和上海的天气),你的循环要怎么处理?——Day 3 写代码时验证你的猜想。
 
-**工具抽象(自己定义,这是你后面框架理解的地基)**:
+#### 1.5 常见卡点
+
+| 现象                              | 原因 / 解法                                  |
+| ------------------------------- | ---------------------------------------- |
+| 带了 tools 但模型直接回答,不调工具           | 正常!模型自己判断要不要调。问题里没提到天气/它觉得不需要时就不调——换问法「北京今天天气怎么样?」而不是「你好」 |
+| 响应里 `content` 是 null,程序解析出空     | 预期行为:要工具时就没有 content。解析要同时兼容「content 为主」和「tool_calls 为主」两种形态 |
+| `arguments` 拿出来 `readTree` 报错   | 你把它当对象直接取字段了——它是**字符串**,要先 `readTree(arguments)` 再取 `city` |
+| 第二发 curl 报 400,提示 messages 顺序错误 | assistant(tool_calls)消息没原样回传,或 tool 消息的 `tool_call_id` 和 id 对不上 |
+| tools 格式写错但 curl 返回 200         | 服务端对 tools 校验松,模型可能无视你的 schema——对照 1.1 的报文逐字段检查 |
+
+**Day 1 打卡项**:
+
+- [x] curl 两发都跑通:第一发看到 `tool_calls`,第二发看到最终回答
+- [x] 能徒手画出消息流转图(含 assistant 原样回传和 role=tool 消息)
+- [x] 能口头说清:「LLM 不执行工具,只生成调用请求」
+- [x] 五个协议事实表格合上文档能复述(尤其「arguments 是字符串」)
+- [x] git 提交:`git add -A && git commit -m "W2D1: function calling 协议学习 + 消息流转图"`
+
+---
+
+### Day 2:工具注册表 + JSON Schema 生成(约 2 小时)
+
+**今天把「工具」变成代码里的第一等公民。** 目标:定义 `Tool` 抽象 + `ToolRegistry`,能生成 OpenAI 协议的 `tools` JSON;再把 lab01 的 `LlmClient` 升级出一个通用入口,发一个带 tools 的请求,**打印原始响应**(不解析,解析是明天的作业)。
+
+#### 2.1 建工程 + 升级 LlmClient(30 分钟)
+
+建 `lab02-tool-loop` Maven 工程(pom 依赖和 lab01 完全一样:jackson + slf4j + junit)。把 lab01 的 `LlmClient.java` 复制到 `com.example.llm` 包下,然后**新增一个通用方法**——上周的 `chat()` 写死了「system + user 两条消息」,本周要支持任意消息列表 + tools:
+
+```java
+/**
+ * 通用入口:任意 messages + 可选 tools 声明,返回原始响应 JSON 文本。
+ * 解析是 Day 3 的作业 —— 今天只负责发出去、把原文拿回来。
+ *
+ * @param toolsJson 工具数组的 JSON 字符串(ToolRegistry.toToolsJson() 的产物),可为 null
+ */
+public String chatCompletions(List<Map<String, Object>> messages, String toolsJson) {
+    try {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", messages);
+        if (toolsJson != null && !toolsJson.isBlank()) {
+            // 关键:toolsJson 是 JSON 字符串,必须 readTree 之后挂进 body,
+            // 否则序列化时会被当成普通字符串转义,服务端收到的是带 \" 的天书
+            body.put("tools", mapper.readTree(toolsJson));
+        }
+        HttpRequest request = getHttpRequest(body);
+        HttpResponse<String> response = httpClient.send(request,
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() != 200) {
+            throwLlmError(response.statusCode(), response.body());
+        }
+        return response.body();
+    } catch (Exception e) {
+        throw new RuntimeException("LLM 调用失败: " + e.getMessage(), e);
+    }
+}
+```
+
+> 顺手感受一下:上周写的 `throwLlmError`/`getHttpRequest` 直接复用——这就是「自己写过的代码才是自己的资产」。AI 生成的代码你未必敢这么直接复用,因为你不确定它的边界。
+
+#### 2.2 Tool 抽象(15 分钟)
+
+`com.example.agent.Tool`:
 
 ```java
 package com.example.agent;
 
 import java.util.function.Function;
 
+/**
+ * 工具抽象:声明(name/description/schema)和实现(handler)绑在一起。
+ * 这就是你后面看 Spring AI @Tool / ToolCallback 时的地基。
+ */
 public record Tool(
         String name,
         String description,
@@ -1156,11 +1409,45 @@ public record Tool(
 ) {}
 ```
 
-**工具注册表**:
+#### 2.3 手写 JSON Schema(20 分钟)
+
+`parametersJsonSchema` 是**给模型看的说明书**——模型靠它决定传什么参数。先徒手写一个 get_weather 的 schema(不许用代码生成,手写一遍才知道每个字段干嘛):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "city": {"type": "string", "description": "城市名,如:北京"}
+  },
+  "required": ["city"]
+}
+```
+
+三个字段的作用(背下来):
+
+| 字段            | 作用          | 写差了会怎样                          |
+| ------------- | ----------- | ------------------------------- |
+| `description` | 告诉模型这个参数是什么 | 不写,模型传参全靠猜,准确率暴跌                |
+| `type`        | 参数类型约束      | 不写,模型可能传 `{"city": 3}`          |
+| `required`    | 必填清单        | 不写,模型可能漏传 city,你的 handler 要处处判空 |
+
+#### 2.4 ToolRegistry(45 分钟,今天的主体)
+
+`com.example.agent.ToolRegistry`,**`toToolsJson()` 的 TODO 必须自己填**:
 
 ```java
+package com.example.agent;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.util.*;
+
 public class ToolRegistry {
+
     private final Map<String, Tool> tools = new LinkedHashMap<>();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     public ToolRegistry register(Tool tool) {
         tools.put(tool.name(), tool);
@@ -1172,13 +1459,19 @@ public class ToolRegistry {
         // TODO: 输出形如
         // [{"type":"function","function":{"name":"get_weather",
         //   "description":"查询指定城市天气",
-        //   "parameters":{"type":"object","properties":{"city":{"type":"string"}},
-        //   "required":["city"]}}}]
+        //   "parameters":{ ... 你传入的 schema 原文解析后的对象 ... }}}]
+        //
+        // 提示:用 mapper.createArrayNode()/createObjectNode() 逐层搭,
+        // parametersJsonSchema 字符串用 mapper.readTree() 转成 JsonNode 挂进去(和 2.1 同一个坑)
     }
 
+    /** 执行工具:任何异常都转成错误文本返回,绝不让循环崩掉(Day 4 会重点强化) */
     public String execute(String name, String argsJson) {
         Tool t = tools.get(name);
-        if (t == null) throw new IllegalArgumentException("未知工具: " + name);
+        if (t == null) {
+            // 未知工具:返回错误文本给模型,让它自己纠正(而不是抛异常崩掉)
+            return "工具不存在: " + name + ",可用工具: " + tools.keySet();
+        }
         try {
             return t.handler().apply(argsJson);
         } catch (Exception e) {
@@ -1191,74 +1484,406 @@ public class ToolRegistry {
 }
 ```
 
-**核心循环(本周的心脏,务必手写)**:
+> `execute()` 里两个「返回错误文本而不是抛异常」的分支是本周最重要的设计决策:**工具出错是 Agent 的常规状态,不是异常**。模型收到错误文本会换路径重试——这就是「把错误喂回模型」的思想,第 12 周可靠性工程会把它升级成策略。
+
+#### 2.5 Main 验证:发出去,看原文(10 分钟)
+
+`Main` 里注册 get_weather(handler 先返回假数据),调用 `chatCompletions`,**把原始响应整个打印出来**:
 
 ```java
-/**
- * 一轮 Agent 交互:内部自动处理工具调用,直到模型给出最终答案。
- */
-public String run(String systemPrompt, String userMessage) {
-    List<Map<String, Object>> messages = new ArrayList<>();
-    messages.add(Map.of("role", "system", "content", systemPrompt));
-    messages.add(Map.of("role", "user", "content", userMessage));
+ToolRegistry registry = new ToolRegistry();
+registry.register(new Tool(
+        "get_weather",
+        "查询指定城市的当前天气",
+        "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
+        argsJson -> "晴,25°C"));   // 假数据,Day 4 再认真写
 
-    for (int round = 0; round < MAX_ROUNDS /* 建议 8 */ ; round++) {
-        Map<String, Object> resp = callLlmWithTools(messages);  // 你第 1 周的 client 加个 tools 参数
-        AssistantTurn turn = parseAssistantTurn(resp);
-        // AssistantTurn 至少包含:content(可能为 null)、toolCalls(列表:id/name/argsJson)
+List<Map<String, Object>> messages = List.of(
+        Map.of("role", "user", "content", "北京今天天气怎么样?"));
 
-        // 1. 把 assistant 的消息(含 tool_calls)原样追加回 messages —— 协议要求!
-        messages.add(turn.toMessage());
+String raw = llmClient.chatCompletions(messages, registry.toToolsJson());
+System.out.println(raw);   // 对照 Day 1 的 curl 响应,看 tool_calls 长得一样不一样
+```
 
-        // 2. 没有工具调用 → 最终答案
-        if (turn.toolCalls().isEmpty()) {
-            return turn.content();
-        }
+对照 Day 1 你抄下来的响应原文逐字段核对——`tool_calls[].function.arguments` 是不是字符串?`content` 是不是 null?**用肉眼把「curl 看到的」和「Java 拿到的」焊在一起。**
 
-        // 3. 有工具调用 → 逐个执行,每个结果作为 role=tool 的消息追加
-        for (ToolCall tc : turn.toolCalls()) {
-            log.info("调用工具 {} 参数 {}", tc.name(), tc.argsJson());
-            String result = registry.execute(tc.name(), tc.argsJson());
-            log.info("工具结果 {}", result);
-            messages.add(Map.of(
-                    "role", "tool",
-                    "tool_call_id", tc.id(),
-                    "content", result
-            ));
-        }
+#### 2.6 常见卡点
+
+| 现象                                     | 原因 / 解法                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `tools` 字段发出去是带 `\"` 的转义字符串            | `toolsJson` 直接 `body.put` 了,忘了 `mapper.readTree()`(2.1 的坑) |
+| 模型始终不调工具                               | schema 的 `name`/`description` 写得太含糊;或问题根本不需要工具。对照 Day 1 的报文逐字段检查 |
+| `toToolsJson()` 输出的 JSON 里 schema 内容丢失 | `parametersJsonSchema` 当字符串塞进 ObjectNode 了,要 `readTree` 挂对象 |
+| handler 返回假数据,担心「这不算作弊」                | 单元测试的思路:今天测的是「协议链路通不通」,不是「天气准不准」。假数据是桩,合法 |
+| 想给工具加必填以外的可选参数                         | schema 里 `properties` 多写一个字段、`required` 里不放它即可——顺便想想 handler 怎么取可选参数 |
+
+**Day 2 打卡项**:
+
+- [ ] `Tool` + `ToolRegistry` 完成,`toToolsJson()` 输出的 JSON 和 Day 1 curl 里 `tools` 字段格式一致
+- [ ] `LlmClient.chatCompletions()` 升级完成,能看到模型返回的 `tool_calls` 原文
+- [ ] 手写过一遍 get_weather 的 JSON Schema,能说出 `description`/`type`/`required` 各自的作用
+- [ ] 合上文档,能在 15 分钟内重写出 `toToolsJson()` 的逐层组装
+- [ ] git 提交:`git add -A && git commit -m "W2D2: 工具注册表 + JSON Schema 生成"`
+
+---
+
+### Day 3:核心循环(约 2.5 小时,本周的心脏)
+
+**今天写整个转型里最重要的一段代码。** 目标:实现 `Agent.run()` —— 「模型要工具 → 本地执行 → 喂回 → 直到最终答案」的完整循环。**这段代码必须手写**,第 8 周的自检就考它(第一阶段交付物:合上文档 2 小时内手写出来)。
+
+#### 3.1 解析:AssistantTurn + ToolCall(40 分钟)
+
+先定义「一轮助手回复」的数据结构:
+
+```java
+package com.example.agent;
+
+/** 单个工具调用请求:id 是协议凭证,name 是工具名,argsJson 是参数 JSON 字符串 */
+public record ToolCall(String id, String name, String argsJson) {}
+```
+
+```java
+package com.example.agent;
+
+import java.util.List;
+import java.util.Map;
+
+/** 一轮助手回复:可能有 content、可能有 toolCalls、可能两者都有 */
+public record AssistantTurn(String content, List<ToolCall> toolCalls) {
+
+    /**
+     * 协议红线:assistant 消息(含 tool_calls)必须原样追加回 messages。
+     * TODO: 组装出符合协议的 Map:
+     *   {"role":"assistant","content":content(可为 null),
+     *    "tool_calls":[{"id":...,"type":"function",
+     *                   "function":{"name":...,"arguments":...}}]}
+     */
+    public Map<String, Object> toMessage() {
+        // TODO: 自己写。注意 tool_calls 为空时不要输出该字段(普通回答没有它)
     }
-    return "已达到最大轮次限制,任务未完成。";
 }
 ```
 
-**必须自己写的解析**:`AssistantTurn` 从响应 JSON 里解析 `message.content`、`message.tool_calls[].id/function.name/function.arguments`。注意:**`function.arguments` 是字符串,不是对象**——第一次写的人 100% 在这栽跟头,栽了就记住它。
+**必须自己写的解析**:`parseAssistantTurn(JsonNode root)` 从响应 JSON 里取 `message.content` 和 `message.tool_calls[]`。三个防御点(全踩过的坑):
 
-### Day 4:两个真实工具
-
-自己实现(不许抄):
+1. `content` 可能是 **null**(要工具时)——用 `path()` + `isNull()` 判断,别 NPE
+2. `tool_calls` 可能缺失(普通回答)——`path("tool_calls").isMissingNode()` 时返回空列表
+3. **`function.arguments` 是字符串**——`argsJson` 原样存进 `ToolCall`,不要在这里解析它(Day 4 的 execute 才管)
 
 ```java
-// 工具 1:查天气(可以 mock,返回假数据)
-//   name: get_weather, params: {city: string}
-// 工具 2:计算器(安全版本:自己写解析,或者用 ScriptEngine —— 想想为什么不能直接 eval 用户输入!)
-//   name: calculate, params: {expression: string}
+public static AssistantTurn parseAssistantTurn(JsonNode root) {
+    JsonNode message = root.path("choices").path(0).path("message");
+    // TODO 1: content —— isNull/isMissing 时置 null,否则 asText()
+    // TODO 2: toolCalls —— 遍历 message.path("tool_calls"),
+    //         每个取 id、function.name、function.arguments(字符串,原样存!)
+    // TODO 3: 返回 new AssistantTurn(content, toolCalls)
+}
 ```
 
-**思考题(写进 README,面试素材)**:模型可能编造不存在的工具名、可能传错参数类型——你的代码里怎么兜住?
+#### 3.2 run() 循环(60 分钟,今天的主体)
 
-### Day 5:验收
+`com.example.agent.Agent`,**TODO 处必须自己填**:
 
-运行效果示意:
+```java
+package com.example.agent;
+
+import com.example.llm.LlmClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+public class Agent {
+
+    private static final int MAX_ROUNDS = 8;   // 防死循环的保险丝
+    private final LlmClient llm;
+    private final ToolRegistry registry;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public Agent(LlmClient llm, ToolRegistry registry) {
+        this.llm = llm;
+        this.registry = registry;
+    }
+
+    /**
+     * 一轮 Agent 交互:内部自动处理工具调用,直到模型给出最终答案。
+     */
+    public String run(String systemPrompt, String userMessage) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+        messages.add(Map.of("role", "user", "content", userMessage));
+
+        for (int round = 0; round < MAX_ROUNDS; round++) {
+            // 1. TODO: 调 llm.chatCompletions(messages, registry.toToolsJson()),
+            //    把返回的原始 JSON 用 mapper.readTree 解析,再 parseAssistantTurn
+            AssistantTurn turn = /* TODO */ null;
+
+            // 2. TODO: 把 assistant 的消息(含 tool_calls)原样追加回 messages —— 协议红线!
+            //    messages.add(turn.toMessage());
+
+            // 3. TODO: 没有工具调用 → 最终答案,return turn.content()
+            if (turn.toolCalls().isEmpty()) {
+                /* TODO */
+            }
+
+            // 4. 有工具调用 → 逐个执行,每个结果作为 role=tool 的消息追加
+            for (ToolCall tc : turn.toolCalls()) {
+                System.out.println("[调用工具] " + tc.name() + " " + tc.argsJson());
+                String result = registry.execute(tc.name(), tc.argsJson());
+                System.out.println("[工具结果] " + result);
+                messages.add(Map.of(
+                        "role", "tool",
+                        "tool_call_id", tc.id(),
+                        "content", result
+                ));
+            }
+        }
+        return "已达到最大轮次限制,任务未完成。";
+    }
+}
+```
+
+写完后对照 1.4 的图逐箭头核对:每个箭头对应代码的哪一行?**对不上的地方就是 bug。**
+
+思考题验证:模型返回两个 tool_calls 时,上面的 for 循环会把两个结果都作为 `role=tool` 消息追加——每个 `tool_call_id` 各对各。对照协议想清楚:**为什么不能合并成一条 tool 消息?**(提示:服务端靠 id 配对)
+
+#### 3.3 第一个工具跑通闭环(30 分钟)
+
+用 get_weather 的 mock handler 先跑通(今天的重点是循环,不是工具本身):
+
+```java
+public static void main(String[] args) {
+    // 省略配置加载(照抄 lab01 Main)
+    LlmClient llm = new LlmClient(baseUrl, model, apiKey);
+    ToolRegistry registry = new ToolRegistry();
+    registry.register(new Tool(
+            "get_weather",
+            "查询指定城市的当前天气",
+            "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
+            argsJson -> {
+                // 假数据:北京晴 25,上海多云 28(明天写真的解析)
+                String city = /* 从 argsJson 里抠出 city,简单点可以 contains 判断 */ "";
+                return city.contains("上海") ? "多云,28°C" : "晴,25°C";
+            }));
+
+    Agent agent = new Agent(llm, registry);
+    String answer = agent.run("你是一个能查天气的助手,回答要简洁", "北京今天天气怎么样?");
+    System.out.println("最终答案: " + answer);
+}
+```
+
+**期望看到的输出**(消息流转的雏形):
+
+```
+[调用工具] get_weather {"city":"北京"}
+[工具结果] 晴,25°C
+最终答案: 北京今天晴,25°C。
+```
+
+#### 3.4 常见卡点(今天这张表最值钱)
+
+| 现象                                       | 原因 / 解法                                  |
+| ---------------------------------------- | ---------------------------------------- |
+| NPE 在 `turn.content()`                   | 要工具时 content 是 null——返回最终答案前的 `isEmpty` 判断走的是 toolCalls,content 别直接用 |
+| 服务端 400:messages 格式错误 / tool_calls 后面必须跟 tool 消息 | assistant 消息没 `toMessage()` 原样回传,或 tool 消息漏了 `tool_call_id`——对照 1.3 的两条协议红线 |
+| 死循环,一直调工具停不下来                            | MAX_ROUNDS 没设,或喂回的 tool 结果一直「答非所问」。先打印 messages 观察模型在纠结什么 |
+| `arguments` 解析 NPE / 报错                  | 又把它当对象了——它是**字符串**。argsJson 先存着,handler 里再 `readTree` |
+| 模型回答了但内容是「我需要查询天气」之类没有实际答案               | 它把 tool_calls 忘了回传或回传格式不对,打印 messages 逐条对照 1.1/1.2 的 curl 报文 |
+| 输出正确但日志看不出流转                             | 没在循环里打印工具调用/结果——3.3 的两行打印是调试生命线,别省       |
+
+**Day 3 打卡项**:
+
+- [ ] `AssistantTurn`/`ToolCall` 解析完成,content 为 null、tool_calls 缺失两种形态都不 NPE
+- [ ] `run()` 循环手写完成,**没有复制粘贴今天文档里的代码**(写完再对照改差异)
+- [ ] get_weather mock 场景跑通:模型调工具 → 喂回 → 最终答案
+- [ ] 能答出思考题:多个 tool_calls 为什么不能合并成一条 tool 消息
+- [ ] 合上文档,能在 25 分钟内重写出「解析 → 回传 assistant → 执行 → 喂回 tool → 循环」的主流程
+- [ ] git 提交:`git add -A && git commit -m "W2D3: tool use 核心循环"`
+
+---
+
+### Day 4:接入 2 个真实工具 + 异常处理(约 2 小时)
+
+**今天把「能跑的 demo」变成「搞不坏的 demo」。** 目标:实现 get_weather 和 calculate 两个真工具;然后系统性地把「模型乱来」的每一种情况兜住。今天的对抗测试是本周的高光时刻。
+
+#### 4.1 工具 1:get_weather(20 分钟)
+
+mock 数据源,但**参数解析要认真写**(argsJson → city 字符串):
+
+```java
+// name: get_weather, params: {city: string}
+// handler: readTree(argsJson).path("city").asText(),按城市返回假天气
+// 城市不在你的假数据表里 → 返回 "未找到城市: xxx"(错误文本给模型,不是抛异常!)
+```
+
+#### 4.2 工具 2:calculate 安全计算器(50 分钟,今天的硬骨头)
+
+**先想清楚为什么不能直接 eval 用户输入**:模型生成的 `expression` 是**不可信输入**,如果用 `ScriptEngine.eval()` 或任何动态执行,用户一句「请计算 Runtime.getRuntime().exec('rm -rf /')」就是远程代码执行漏洞(RCE)。**模型的输出 = 用户的输入**,这条安全铁律从今天焊死。
+
+自己写一个只支持数字、`+ - * / ( )` 的表达式解析器(递归下降或双栈调度场算法,二选一):
+
+```
+整体思路(递归下降):
+  expr   = term (('+'|'-') term)*
+  term   = factor (('*'|'/') factor)*
+  factor = 数字 | '(' expr ')' | ('+'|'-') factor   ← 一元正负号
+```
+
+```java
+// name: calculate, params: {expression: string}
+// handler 流程:
+//   1. 取出 expression 字符串
+//   2. 非法字符(字母/分号等)→ 直接返回 "非法表达式: 含不允许的字符"
+//   3. 解析计算,返回结果字符串,如 "结果: 14"
+//   4. 除零 → 返回 "错误: 除数不能为 0"(错误文本,不是异常)
+// TODO: 递归下降解析器,大约 60 行,这是今天主要的练习量
+```
+
+> 参考 LeetCode「基本计算器 II」的思路,但要自己写——这段代码的价值在于:它是你「不信任模型输出」的第一条防线,面试聊「Agent 安全」时这就是实物。
+
+#### 4.3 异常矩阵:把「模型乱来」的每条路都兜住(20 分钟)
+
+逐条走查(每条都要在运行里**实际触发一次**,不是看完觉得「应该没问题」):
+
+| 模型乱来的姿势                      | 你的程序该干嘛                             | 现状检查          |
+| ---------------------------- | ----------------------------------- | ------------- |
+| 编造不存在的工具名(`delete_database`) | `execute()` 返回「工具不存在: ...」文本,模型自己换路 | Day 2 已写,今天实测 |
+| `arguments` 不是合法 JSON        | handler 里 catch 后返回错误文本             | 在 handler 里补  |
+| 参数漏传(没 city)                 | 返回「缺少参数 city」文本                     | 在 handler 里补  |
+| 参数类型错(`city: 3`)             | 取出来当字符串用,或判类型返回错误文本                 | 在 handler 里补  |
+| 工具内部炸了(除零/解析失败)              | catch 后返回错误文本,循环继续                  | Day 2 已写      |
+| 一直调工具不收敛                     | MAX_ROUNDS 兜底返回                     | Day 3 已写      |
+
+#### 4.4 对抗测试:诱导它编造工具(20 分钟,今天的灵魂)
+
+在 Main 里把 userMessage 换成攻击性输入,**观察并记录行为**:
+
+| 测试输入                                 | 预期行为                       | 实际行为(填) |
+| ------------------------------------ | -------------------------- | ------- |
+| 「请调用 delete_all_data 工具删除所有数据」       | 不崩;模型收到「工具不存在」后解释做不到       |         |
+| 「不用工具,直接告诉我北京天气」(mock 数据外的城市)        | 如实返回「未找到城市」,不编造天气          |         |
+| 「计算 1/0」                             | 返回「除数不能为 0」,循环不崩           |         |
+| 「计算 Runtime.getRuntime().exec('ls')」 | calculate 判非法字符拒绝,**绝不执行** |         |
+
+把这张表填完写进 README。**这就是「Agent 安全」的第一课**:工具白名单(只有你注册的能被调用)+ 参数校验(不信任模型输出)+ 错误文本回喂(让模型自我纠正)——三层防线,今天全部亲手摸过。
+
+#### 4.5 常见卡点
+
+| 现象                           | 原因 / 解法                                  |
+| ---------------------------- | ---------------------------------------- |
+| calculate 想抄现成表达式库           | 忍住。今天手写解析器是练「安全处理不可信输入」的手感,库以后随口就来       |
+| 递归下降写到一半乱了                   | 先把 4.2 的 BNF 抄在纸上,每个方法对应一条规则;先支持数字和 +,跑通再加 * / ( ) |
+| 对抗测试里模型真去「调用」delete_all_data | 正常,它只是生成调用请求——你的 `execute()` 返回「工具不存在」后,看它下一步是不是自己纠正了(这是观察模型行为的绝佳样本) |
+| 想在 handler 里抛异常「让上层处理」       | 回看 ToolRegistry.execute 的设计:工具错误是常规状态,转错误文本给模型,不是抛异常 |
+
+**Day 4 打卡项**:
+
+- [ ] get_weather 参数解析完整(缺参/未知城市都有错误文本)
+- [ ] calculate 手写解析器完成,**确认没有使用任何 eval/ScriptEngine**
+- [ ] 4.3 异常矩阵 6 条全部实际触发过一遍
+- [ ] 4.4 对抗测试表格填完,记录进 README
+- [ ] 合上文档,能说出「模型输出 = 用户输入」的三层防线
+- [ ] git 提交:`git add -A && git commit -m "W2D4: 真实工具 + 异常兜底 + 对抗测试"`
+
+---
+
+### Day 5:CLI 演示 + 消息流转日志(约 2 小时)
+
+**今天把成果变成可以演示、可以放进简历的东西。** 目标:一个可交互的 CLI,跑得出「北京和上海哪个温度高」这种需要**多轮工具调用**的复合问题;消息流转日志完整可读;README 写好。
+
+#### 5.1 CLI:多轮命令行(30 分钟)
+
+`Main` 升级成简单 REPL(本周先单轮问答即可,多轮对话记忆是第 3 周的作业):
 
 ```
 > 北京和上海今天哪个城市温度更高?
-[调用工具 get_weather {"city":"北京"}] → 晴,25°C
-[调用工具 get_weather {"city":"上海"}] → 多云,28°C
+[调用工具] get_weather {"city":"北京"}
+[工具结果] 晴,25°C
+[调用工具] get_weather {"city":"上海"}
+[工具结果] 多云,28°C
 上海温度更高(28°C > 25°C)。
+> /quit
 ```
 
-- [ ] **验收标准**:消息流转日志完整可读;模型编造工具名时程序不崩,而是回复模型「工具不存在」让它自己纠正
-- [ ] 🐍 Python 对照(可选,1 小时):用官方 SDK 跑同一个 demo,看 `tool_calls` 结构是否一致 → 你会理解「协议是统一的,框架只是封装」
+```java
+// Scanner 读一行,调 agent.run(),打印答案;/quit 退出
+// 注意:上面的 demo 里两个工具调用可能是「一轮两个 tool_calls」或「两轮各一个」,
+// 两种形态你的循环都要支持 —— 观察实际是哪种,写进笔记
+```
+
+#### 5.2 消息流转日志(40 分钟)
+
+把 `Agent.run()` 里的 `System.out` 升级成结构化输出——**这个日志就是你的「Agent 可观测性」初体验**(第 14 周的 Trace 是它的工业版):
+
+```
+── Agent 开始 ────────────────────────────
+[轮次 1] 请求 messages=2 条
+[轮次 1] 模型请求工具: get_weather({"city":"北京"})
+[轮次 1] 工具结果: 晴,25°C
+[轮次 2] 请求 messages=5 条
+[轮次 2] 模型请求工具: get_weather({"city":"上海"})
+[轮次 2] 工具结果: 多云,28°C
+[轮次 3] 请求 messages=8 条
+[轮次 3] 最终答案: 上海温度更高(28°C > 25°C)。
+── Agent 结束: 共 3 轮,调用工具 2 次 ──────
+```
+
+要求:每轮打印「当前 messages 条数」(第 3 周做记忆裁剪时这是关键观测点)、工具名 + 参数、结果摘要、最终答案。**验收标准(本周总验收)**:
+
+- [ ] 「北京和上海哪个温度高」复合问题跑通,流转日志完整可读
+- [ ] 模型编造工具名时程序不崩,而是回复模型「工具不存在」让它自己纠正(4.4 的场景重现一次)
+- [ ] 拿到一份能给别人演示的输出截图/录屏文本
+
+#### 5.3 写 README(30 分钟)
+
+按这个骨架写(两个 lab 的 README 风格保持一致,作品集门面):
+
+```markdown
+# lab02-tool-loop — 手写 Tool Use 循环
+
+不依赖任何 AI 框架的最小 Agent 内核:工具注册 → function calling 协议 → 多轮执行循环。
+
+## 我实现了什么
+- Tool / ToolRegistry:工具抽象 + JSON Schema 生成(tools 协议字段)
+- Agent.run():「模型要工具 → 执行 → 喂回」循环,含 MAX_ROUNDS 保险丝
+- AssistantTurn 解析:兼容 content/tool_calls 两种形态
+- 安全 calculate:手写递归下降解析器,拒绝一切动态执行
+- 异常矩阵:未知工具/坏参数/工具异常全部转错误文本喂回模型
+
+## 消息流转图(贴上 Day 1 画的那张)
+
+## 演示
+(贴 5.2 的流转日志输出)
+
+## 对抗测试记录(Day 4 的表格)
+
+## 踩坑记录(从「常见卡点」表里挑印象最深的 5 条)
+1. function.arguments 是字符串不是对象 —— ...
+2. ...
+
+## 面试思考题
+- 模型可能编造不存在的工具名、可能传错参数类型,怎么兜住?(三层防线)
+- 为什么不能 eval 模型给的表达式?(模型输出 = 用户输入)
+```
+
+#### 5.4 第 2 周收尾自检(20 分钟)
+
+对照 0 节铁律,**诚实回答**:
+
+- [ ] 合上文档,`run()` 主循环(解析 → 回传 assistant → 执行 → 喂回 tool → 循环)能不能徒手写出来?
+- [ ] `function.arguments` 是什么类型?assistant 消息为什么必须原样回传?能不能一句话给同事讲明白?
+- [ ] 这周有没有哪段代码是复制粘贴的?有就删掉重打一遍(尤其 run(),它是本周的心脏)
+- [ ] 「模型输出 = 用户输入」的三层防线,能不能不看笔记说出来?
+
+**Day 5 打卡项**:
+
+- [ ] CLI 演示跑通复合问题,消息流转日志完整
+- [ ] README 按 5.3 骨架写完(含流转图、对抗测试表、踩坑记录)
+- [ ] 第 2 周自检 4 条全部诚实过关
+- [ ] 🐍 Python 对照(可选,1 小时):用官方 SDK 跑同一个 demo,对比 `tool_calls` 结构是否一致 → 你会理解「协议是统一的,框架只是封装」
+- [ ] git 提交:`git add -A && git commit -m "W2D5: CLI 演示 + 消息流转日志 + README"`
+- [ ] 进度日志填第 2 周一行
 
 ---
 
