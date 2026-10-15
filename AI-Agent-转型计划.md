@@ -257,7 +257,7 @@ IDEA 里直接点 `Main` 旁边的运行箭头,或命令行:
 
 ```bash
 cd ~/claude_code/ai-agent-lab/lab01-llm-client
-mvn compile exec:java -Dexec.mainClass=com.example.llm.Main
+mvn compile exec:java -Dexec.mainClass=llm.com.example.llm.Main
 # (首次用 exec:java 需要加 exec-maven-plugin,或干脆用 IDEA 跑,更省事)
 ```
 
@@ -1119,6 +1119,15 @@ print(resp.choices[0].message.content)
 
 **本周成果**:`lab02-tool-loop` 模块 —— 一个能自主「查天气 → 对比 → 回答」的最小 Agent。写完这周,你就有底气在面试里说「我手写过 Agent 内核」;后面学 Spring AI / LangGraph,你会发现它们的源码只是在复述你这周写的东西。
 
+**本周全景(先读 5 分钟)**——第 1 周的 LlmClient 是「一问一答」;本周把它升级成「模型能反过来指挥你的代码干活」:模型说「我要查北京天气」,你的 Java 代码去执行,把结果喂回去,模型继续思考。这就是 Agent 的最小形态。你要手写的 4 个东西,和将来框架里的谁一一对应:
+
+| 你手写的类 | 职责 | 将来对应框架里的谁 |
+|---|---|---|
+| `Tool` | 工具抽象:名字/描述/参数 schema/执行函数 | Spring AI 的 `@Tool` 注解方法 |
+| `ToolRegistry` | 注册、生成 tools JSON、统一执行+兜底 | `ToolCallingManager` |
+| `Agent.run()` | 「模型开单 → 本地执行 → 喂回」循环 | ChatClient 的内部循环 |
+| `get_weather` / `calculate` | 两个真实工具 | 业务 Tool 实现 |
+
 ### 今天要干什么
 
 - [ ] **Day 1**:理解 function calling 的 JSON 协议(画出消息流转图)
@@ -1312,6 +1321,23 @@ curl https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v
 1. **assistant 消息(含 tool_calls)必须原样追加回 messages**——不是可选项,是协议要求
 2. **每个 tool_calls 对应一条 `role=tool` 消息**,`tool_call_id` + `content`(工具结果文本,哪怕出错也要回文本)
 
+**messages 数组里的四种消息形态速查**(每条是谁产生的、长什么样):
+
+| # | role | 关键字段 | 谁产生 |
+|---|---|---|---|
+| 1 | `system` / `user` | `content` | 你 |
+| 2 | `assistant` + `tool_calls` | `content` 常为 null/空串;`tool_calls[]` 每项:`id`、`function.name`、`function.arguments`(**字符串!**) | 模型 |
+| 3 | `tool` | `tool_call_id`(必须对应某张单的 id)、`content`(工具结果文本) | 你 |
+| 4 | `assistant` 最终答案 | 只有 `content`,无 `tool_calls` | 模型 |
+
+顺手把第 1 周的 finish_reason 表(4.5)更新成三行——本周你会见到第三种:
+
+| `finish_reason` | 含义 | 你要做什么 |
+| --- | --- | --- |
+| `"stop"` | 正常说完了 ✅ | 取 `content`,结束 |
+| `"length"` | 撞上 max_tokens 被截断 ⚠️ | 报错,**不要重试**(第 1 周 4.5) |
+| `"tool_calls"` | 不是答案,是「开单」 | 执行工具 → 喂回 → 继续循环 |
+
 #### 1.4 画消息流转图(30 分钟,今天的主交付)
 
 **在纸上画一遍**,画完再对照下面:
@@ -1324,9 +1350,29 @@ LLM → "我要调用 get_weather(city='北京')"(tool_calls,带 id)→ 你
 LLM → "北京今天晴,25°C"(最终答案,finish_reason=stop)
 ```
 
-**关键认知(写进笔记,面试原话)**:LLM 不执行任何工具!它只是说「请帮我调这个函数,参数是这些」。执行和喂回都是你的代码的事——这就是「Agent 循环」的全部秘密:一个 while 循环 + 一份不断变长的消息列表。
+**关键认知(写进笔记,面试原话)**:LLM 不执行任何工具!它只是说「请帮我调这个函数,参数是这些」。执行和喂回都是你的代码的事——这就是「**Agent 循环**」的全部秘密:一个 while 循环 + 一份不断变长的消息列表。
 
-思考题:如果模型一次返回 **两个** tool_calls(比如同时查北京和上海的天气),你的循环要怎么处理?——Day 3 写代码时验证你的猜想。
+画图的灵魂是**每一步标注 messages 数组的状态**(光画箭头不算,这张「状态图」就是你明天 run() 循环的伪代码):
+
+```
+第 1 轮请求 messages:  [system, user]
+                ↓
+        模型返回 tool_calls(开单,finish_reason=tool_calls)
+                ↓
+        你的代码本地执行工具(模型不参与!)
+                ↓
+第 2 轮请求 messages:  [system, user, assistant(tool_calls), tool(...), tool(...)]
+                ↓
+        模型返回最终答案(finish_reason=stop) → 结束
+```
+
+三个思考题,答案写在图旁边(面试考点):
+
+1. 如果模型一次返回 **两个** tool_calls(比如同时查北京和上海的天气),你的循环要怎么处理?第二轮 messages 里有几条 tool 消息?
+2. 如果不把 assistant(tool_calls) 原样塞回去、只塞 tool 结果,会怎样?(提示:看 1.5 卡点表倒数第二行)
+3. 循环什么时候停?为什么除了「模型不再开单」,还需要 MAX_ROUNDS 兜底?
+
+——Day 3 写代码时验证你的猜想。
 
 #### 1.5 常见卡点
 
@@ -1354,7 +1400,7 @@ LLM → "北京今天晴,25°C"(最终答案,finish_reason=stop)
 
 #### 2.1 建工程 + 升级 LlmClient(30 分钟)
 
-建 `lab02-tool-loop` Maven 工程(pom 依赖和 lab01 完全一样:jackson + slf4j + junit)。把 lab01 的 `LlmClient.java` 复制到 `com.example.llm` 包下,然后**新增一个通用方法**——上周的 `chat()` 写死了「system + user 两条消息」,本周要支持任意消息列表 + tools:
+建 `lab02-tool-loop` Maven 工程(pom 依赖和 lab01 完全一样:jackson + slf4j + junit)。把 lab01 的 `LlmClient.java` 复制到 `com.example.llm` 包下,**复制完先跑一次上周的 `chat()` 验证没漏 import**(继续用 FakeLlmServer 或真 API 均可),然后**新增一个通用方法**——上周的 `chat()` 写死了「system + user 两条消息」,本周要支持任意消息列表 + tools:
 
 ```java
 /**
@@ -1587,7 +1633,7 @@ public static AssistantTurn parseAssistantTurn(JsonNode root) {
 ```java
 package com.example.agent;
 
-import com.example.llm.LlmClient;
+import llm.com.example.llm.LlmClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
