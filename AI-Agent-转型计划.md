@@ -1121,12 +1121,12 @@ print(resp.choices[0].message.content)
 
 **本周全景(先读 5 分钟)**——第 1 周的 LlmClient 是「一问一答」;本周把它升级成「模型能反过来指挥你的代码干活」:模型说「我要查北京天气」,你的 Java 代码去执行,把结果喂回去,模型继续思考。这就是 Agent 的最小形态。你要手写的 4 个东西,和将来框架里的谁一一对应:
 
-| 你手写的类 | 职责 | 将来对应框架里的谁 |
-|---|---|---|
-| `Tool` | 工具抽象:名字/描述/参数 schema/执行函数 | Spring AI 的 `@Tool` 注解方法 |
-| `ToolRegistry` | 注册、生成 tools JSON、统一执行+兜底 | `ToolCallingManager` |
-| `Agent.run()` | 「模型开单 → 本地执行 → 喂回」循环 | ChatClient 的内部循环 |
-| `get_weather` / `calculate` | 两个真实工具 | 业务 Tool 实现 |
+| 你手写的类                       | 职责                        | 将来对应框架里的谁                |
+| --------------------------- | ------------------------- | ------------------------ |
+| `Tool`                      | 工具抽象:名字/描述/参数 schema/执行函数 | Spring AI 的 `@Tool` 注解方法 |
+| `ToolRegistry`              | 注册、生成 tools JSON、统一执行+兜底  | `ToolCallingManager`     |
+| `Agent.run()`               | 「模型开单 → 本地执行 → 喂回」循环      | ChatClient 的内部循环         |
+| `get_weather` / `calculate` | 两个真实工具                    | 业务 Tool 实现               |
 
 ### 今天要干什么
 
@@ -1323,20 +1323,20 @@ curl https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v
 
 **messages 数组里的四种消息形态速查**(每条是谁产生的、长什么样):
 
-| # | role | 关键字段 | 谁产生 |
-|---|---|---|---|
-| 1 | `system` / `user` | `content` | 你 |
-| 2 | `assistant` + `tool_calls` | `content` 常为 null/空串;`tool_calls[]` 每项:`id`、`function.name`、`function.arguments`(**字符串!**) | 模型 |
-| 3 | `tool` | `tool_call_id`(必须对应某张单的 id)、`content`(工具结果文本) | 你 |
-| 4 | `assistant` 最终答案 | 只有 `content`,无 `tool_calls` | 模型 |
+| #    | role                       | 关键字段                                     | 谁产生  |
+| ---- | -------------------------- | ---------------------------------------- | ---- |
+| 1    | `system` / `user`          | `content`                                | 你    |
+| 2    | `assistant` + `tool_calls` | `content` 常为 null/空串;`tool_calls[]` 每项:`id`、`function.name`、`function.arguments`(**字符串!**) | 模型   |
+| 3    | `tool`                     | `tool_call_id`(必须对应某张单的 id)、`content`(工具结果文本) | 你    |
+| 4    | `assistant` 最终答案           | 只有 `content`,无 `tool_calls`              | 模型   |
 
 顺手把第 1 周的 finish_reason 表(4.5)更新成三行——本周你会见到第三种:
 
-| `finish_reason` | 含义 | 你要做什么 |
-| --- | --- | --- |
-| `"stop"` | 正常说完了 ✅ | 取 `content`,结束 |
-| `"length"` | 撞上 max_tokens 被截断 ⚠️ | 报错,**不要重试**(第 1 周 4.5) |
-| `"tool_calls"` | 不是答案,是「开单」 | 执行工具 → 喂回 → 继续循环 |
+| `finish_reason` | 含义                   | 你要做什么                  |
+| --------------- | -------------------- | ---------------------- |
+| `"stop"`        | 正常说完了 ✅              | 取 `content`,结束         |
+| `"length"`      | 撞上 max_tokens 被截断 ⚠️ | 报错,**不要重试**(第 1 周 4.5) |
+| `"tool_calls"`  | 不是答案,是「开单」           | 执行工具 → 喂回 → 继续循环       |
 
 #### 1.4 画消息流转图(30 分钟,今天的主交付)
 
@@ -1565,10 +1565,10 @@ System.out.println(raw);   // 对照 Day 1 的 curl 响应,看 tool_calls 长得
 
 **Day 2 打卡项**:
 
-- [ ] `Tool` + `ToolRegistry` 完成,`toToolsJson()` 输出的 JSON 和 Day 1 curl 里 `tools` 字段格式一致
-- [ ] `LlmClient.chatCompletions()` 升级完成,能看到模型返回的 `tool_calls` 原文
-- [ ] 手写过一遍 get_weather 的 JSON Schema,能说出 `description`/`type`/`required` 各自的作用
-- [ ] 合上文档,能在 15 分钟内重写出 `toToolsJson()` 的逐层组装
+- [x] `Tool` + `ToolRegistry` 完成,`toToolsJson()` 输出的 JSON 和 Day 1 curl 里 `tools` 字段格式一致
+- [x] `LlmClient.chatCompletions()` 升级完成,能看到模型返回的 `tool_calls` 原文
+- [x] 手写过一遍 get_weather 的 JSON Schema,能说出 `description`/`type`/`required` 各自的作用
+- [x] 合上文档,能在 15 分钟内重写出 `toToolsJson()` 的逐层组装
 - [ ] git 提交:`git add -A && git commit -m "W2D2: 工具注册表 + JSON Schema 生成"`
 
 ---

@@ -1,9 +1,12 @@
 package com.example.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -12,33 +15,44 @@ import java.util.Map;
 
 public class ToolRegistry {
 
+    Logger logger = LoggerFactory.getLogger(getClass());
+
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ToolRegistry register(Tool tool){
+    public void register(Tool tool){
         tools.put(tool.name(), tool);
-        return this;
     }
 
     /**
      * 生成 OpenAI tools 字段需要的 JSON 数组字符串
      * @return
      */
-    public String toToolJson() throws JsonProcessingException {
-        ArrayNode root = mapper.createArrayNode();
-        tools.forEach((s, tool) -> {
-            ObjectNode node = mapper.createObjectNode();
-            node.put("type", "function");
-            Map<String, String> functionMap = new HashMap<>();
-            functionMap.put("name", s);
-            functionMap.put("description", tool.description());
-            functionMap.put("parameters", tool.parametersJsonSchema());
-            node.put("function", functionMap.toString());
-            root.add(node);
-        });
+    public String toToolsJson(){
+        try {
+            ArrayNode root = mapper.createArrayNode();
+            for (Map.Entry<String, Tool> entry : tools.entrySet()) {
+                Tool tool = entry.getValue();
+                ObjectNode item = mapper.createObjectNode();
+                item.put("type", "function");
 
-        return mapper.writeValueAsString(root);
+                // function
+                ObjectNode objectNode = mapper.createObjectNode();
+                objectNode.put("name", tool.name());
+                objectNode.put("description", tool.description());
+
+                // parameter 对象
+                JsonNode jsonNode = mapper.readTree(tool.parametersJsonSchema());
+                objectNode.putIfAbsent("parameters", jsonNode);
+                item.putIfAbsent("function", objectNode);
+                root.add(item);
+            }
+            return mapper.writeValueAsString(root);
+        } catch (Exception e) {
+            logger.error("Error while tool json", e);
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -74,6 +88,6 @@ public class ToolRegistry {
                 argsJson -> "晴,25°C"
         ));
 
-        System.out.println(toolRegistry.toToolJson());
+        System.out.println(toolRegistry.toToolsJson());
     }
 }
