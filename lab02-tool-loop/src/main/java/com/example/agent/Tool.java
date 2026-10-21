@@ -12,3 +12,17 @@ public record Tool(
         Function<String, String> handler    // 入参:JSON 字符串;出参:结果字符串
 ) {
 }
+
+/*
+ * parametersJsonSchema 案例：
+ * {
+ *     "type": "object",
+ *     "properties": {
+ *         "city": {
+ *             "type": "string",
+ *             "description": "城市名，如：北京"
+ *         }
+ *     },
+ *     "required": ["city"]
+ * }
+ */
