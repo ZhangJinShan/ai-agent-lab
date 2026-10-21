@@ -1569,7 +1569,7 @@ System.out.println(raw);   // 对照 Day 1 的 curl 响应,看 tool_calls 长得
 - [x] `LlmClient.chatCompletions()` 升级完成,能看到模型返回的 `tool_calls` 原文
 - [x] 手写过一遍 get_weather 的 JSON Schema,能说出 `description`/`type`/`required` 各自的作用
 - [x] 合上文档,能在 15 分钟内重写出 `toToolsJson()` 的逐层组装
-- [ ] git 提交:`git add -A && git commit -m "W2D2: 工具注册表 + JSON Schema 生成"`
+- [x] git 提交:`git add -A && git commit -m "W2D2: 工具注册表 + JSON Schema 生成"`
 
 ---
 
