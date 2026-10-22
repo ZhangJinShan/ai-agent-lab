@@ -77,17 +77,4 @@ public class ToolRegistry {
     public List<Tool> all(){
         return List.copyOf(tools.values());
     }
-
-
-    public static void main(String[] args) throws JsonProcessingException {
-        ToolRegistry toolRegistry = new ToolRegistry();
-        toolRegistry.register(new Tool(
-                "get_weather",
-                "查询指定城市的当前天气",
-                "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
-                argsJson -> "晴,25°C"
-        ));
-
-        System.out.println(toolRegistry.toToolsJson());
-    }
 }
