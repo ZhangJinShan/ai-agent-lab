@@ -1,5 +1,6 @@
 package com.example;
 
+import com.example.agent.Agent;
 import com.example.agent.Tool;
 import com.example.agent.ToolRegistry;
 import com.example.llm.LlmClient;
@@ -19,25 +20,33 @@ public class LoopMain {
 
         ToolRegistry registry = new ToolRegistry();
 
-        registry.register(new Tool(
+        registry.register(
+                new Tool(
                 "get_weather",
                 "查询指定城市的当前天气",
                 "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
-                argsJson -> "晴,25°C"));
-
-        List<Map<String, Object>> messages = List.of(
-                Map.of("role", "user", "content", "北京今天天气怎么样?"));
+                argsJson -> "晴,25°C")
+                );
+        registry.register(
+                new Tool(
+                        "get_attractions",
+                        "查询指定城市的著名景点",
+                        "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
+                        argsJson -> "颐和园")
+        );
 
         LlmClient llmClient = initLlmClient();
         if (null == llmClient) {
             logger.error("llmClient init fail");
             return;
         }
-        String toolsJson = registry.toToolsJson();
-        logger.info("toolsJson: {}", toolsJson);
 
-        String raw = llmClient.chatCompletions(messages, toolsJson);
-        System.out.println(raw);
+        Agent agent = new Agent(
+                llmClient,
+                registry
+        );
+        String answer = agent.run("你是一个智能助手,回答要简洁", "北京今天天气怎么样?有哪些可以玩的地方");
+        System.out.println("最终答案: " + answer);
     }
 
 

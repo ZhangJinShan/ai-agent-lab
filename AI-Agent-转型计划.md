@@ -1740,12 +1740,12 @@ public static void main(String[] args) {
 
 **Day 3 打卡项**:
 
-- [ ] `AssistantTurn`/`ToolCall` 解析完成,content 为 null、tool_calls 缺失两种形态都不 NPE
-- [ ] `run()` 循环手写完成,**没有复制粘贴今天文档里的代码**(写完再对照改差异)
-- [ ] get_weather mock 场景跑通:模型调工具 → 喂回 → 最终答案
-- [ ] 能答出思考题:多个 tool_calls 为什么不能合并成一条 tool 消息
-- [ ] 合上文档,能在 25 分钟内重写出「解析 → 回传 assistant → 执行 → 喂回 tool → 循环」的主流程
-- [ ] git 提交:`git add -A && git commit -m "W2D3: tool use 核心循环"`
+- [x] `AssistantTurn`/`ToolCall` 解析完成,content 为 null、tool_calls 缺失两种形态都不 NPE
+- [x] `run()` 循环手写完成,**没有复制粘贴今天文档里的代码**(写完再对照改差异)
+- [x] get_weather mock 场景跑通:模型调工具 → 喂回 → 最终答案
+- [x] 能答出思考题:多个 tool_calls 为什么不能合并成一条 tool 消息
+- [x] 合上文档,能在 25 分钟内重写出「解析 → 回传 assistant → 执行 → 喂回 tool → 循环」的主流程
+- [x] git 提交:`git add -A && git commit -m "W2D3: tool use 核心循环"`
 
 ---
 
