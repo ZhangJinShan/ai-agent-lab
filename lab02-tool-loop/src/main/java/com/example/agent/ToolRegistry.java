@@ -43,6 +43,7 @@ public class ToolRegistry {
                 // parameter 对象
                 JsonNode jsonNode = mapper.readTree(tool.parametersJsonSchema());
                 objectNode.putIfAbsent("parameters", jsonNode);
+
                 item.putIfAbsent("function", objectNode);
                 root.add(item);
             }

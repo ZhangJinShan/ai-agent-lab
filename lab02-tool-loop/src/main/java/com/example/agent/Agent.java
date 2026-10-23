@@ -1,7 +1,6 @@
 package com.example.agent;
 
 import com.example.llm.LlmClient;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -41,8 +40,6 @@ public class Agent {
 
         try {
             for (int round = 0; round < MAX_ROUNDS; round++) {
-                logger.info("Round {} started", round);
-
                 // 1. 调用 llm
                 String response = llm.chatCompletions(messages, registry.toToolsJson());
                 JsonNode root = mapper.readTree(response);
@@ -64,8 +61,6 @@ public class Agent {
                     logger.info("[工具结果]: {}", result);
                     messages.add(Map.of("role", "tool", "tool_id", toolCall.id(), "content", result));
                 }
-
-                logger.info("round {} finished", round);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -90,7 +85,7 @@ public class Agent {
                 ToolCall toolCall = new ToolCall(
                         item.path("id").asText(),
                         item.path("function").path("name").asText(),
-                        item.path("function").path("args").asText()
+                        item.path("function").path("arguments").asText()
                 );
                 toolCalls.add(toolCall);
             }
