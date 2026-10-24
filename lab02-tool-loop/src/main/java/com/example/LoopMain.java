@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Scanner;
 import java.util.function.Function;
 
 public class LoopMain {
@@ -24,8 +25,35 @@ public class LoopMain {
 
     public static void main(String[] args) {
 
-        ToolRegistry registry = new ToolRegistry();
+        // 初始化Tool注册器
+        ToolRegistry registry = initToolRegistry();
 
+        // 初始化 llm
+        LlmClient llmClient = initLlmClient();
+        if (null == llmClient) {
+            logger.error("llmClient init fail");
+            return;
+        }
+
+        // 初始化 Agent
+        Agent agent = new Agent(
+                llmClient,
+                registry
+        );
+
+        // 调用 Agent
+        Scanner scanner = new Scanner(System.in);
+        String userMessage = scanner.nextLine();
+        String answer = agent.run("你是一个智能助手,回答要简洁准确，如果不知道就直接回答不知道，不要捏造答案", userMessage);
+        logger.info("最终答案 -> {}", answer);
+    }
+
+    /**
+     * 初始化工具注册器
+     * @return
+     */
+    private static ToolRegistry initToolRegistry() {
+        ToolRegistry registry = new ToolRegistry();
         registry.register(
                 new Tool(
                         "get_weather",
@@ -40,23 +68,14 @@ public class LoopMain {
                         "{\"type\":\"object\",\"properties\":{\"expression\":{\"type\":\"string\",\"description\":\"表达式\"}},\"required\":[\"expression\"]}",
                         LoopMain::calculate)
         );
-
-        LlmClient llmClient = initLlmClient();
-        if (null == llmClient) {
-            logger.error("llmClient init fail");
-            return;
-        }
-
-        Agent agent = new Agent(
-                llmClient,
-                registry
-        );
-
-        String answer = agent.run("你是一个智能助手,回答要简洁", "计算 Runtime.getRuntime().exec('ls')");
-        System.out.println("最终答案: " + answer);
+        return registry;
     }
 
 
+    /**
+     * 初始化 llm
+     * @return
+     */
     private static LlmClient initLlmClient() {
 
         // 1. 对 classpath 下的 application.properties 文件
@@ -97,7 +116,7 @@ public class LoopMain {
             JsonNode jsonNode = mapper.readTree(argJson);
             String city = jsonNode.path("city").asText();
 
-            return weatherMap.containsKey(city) ? weatherMap.get(city) : "未找到城市: " + city;
+            return weatherMap.containsKey(city) ? weatherMap.get(city) : "未找到城市 -> " + city;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

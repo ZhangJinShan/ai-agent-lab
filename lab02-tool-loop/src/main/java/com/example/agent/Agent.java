@@ -38,8 +38,13 @@ public class Agent {
         messages.add(Map.of("role", "system", "content", systemPrompt));
         messages.add(Map.of("role", "user", "content", userMessage));
 
+        int executeRounds = 0;
+        int toolCallCount = 0;
+        logger.info("── Agent 开始 ────────────────────────────");
         try {
             for (int round = 0; round < MAX_ROUNDS; round++) {
+                executeRounds ++;
+                logger.info("[轮次 {}] 请求 messages = {} 条", round + 1, messages.size());
                 // 1. 调用 llm
                 String response = llm.chatCompletions(messages, registry.toToolsJson());
                 JsonNode root = mapper.readTree(response);
@@ -51,19 +56,25 @@ public class Agent {
 
                 // 3. 没有工具调用 → 最终答案
                 if (toolCalls.isEmpty()) {
-                    return assistantTurn.content();
+                    String content = assistantTurn.content();
+                    logger.info("[轮次 {}] 最终答案: {}", round + 1, content);
+                    return content;
                 }
 
                 // 4. 有工具调用 → 逐个执行,每个结果作为 role=tool 的消息追加
                 for (ToolCall toolCall : toolCalls) {
-                    logger.info("[调用工具]: {}, 参数是: {}", toolCall.name(), toolCall.argsJson());
+                    logger.info("[轮次 {}] 模型请求工具: {}({})", round + 1, toolCall.name(), toolCall.argsJson());
                     String result = registry.execute(toolCall.name(), toolCall.argsJson());
-                    logger.info("[工具结果]: {}", result);
+                    logger.info("[轮次 {}] 工具结果: {}", round + 1, result);
                     messages.add(Map.of("role", "tool", "tool_id", toolCall.id(), "content", result));
+                    // 统计工具调用次数
+                    toolCallCount++;
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            logger.info("── Agent 结束: 共 {} 轮,调用工具 {} 次 ──────", executeRounds, toolCallCount);
         }
         return "已达到最大轮次限制,任务未完成。";
     }
