@@ -2144,9 +2144,9 @@ public class ConversationMemory {
 
 用 lab01 的测试经验,给 `trim()` 写 3 个测试(不 mock 也行,memory 是纯逻辑):
 
-- [ ] 加 30 条普通消息,窗口 20 → 剩 20 条,丢的是最早的
-- [ ] system 消息永远在,不管加多少条
-- [ ] assistant(tool_calls)+tool 一组不会被裁一半
+- [x] 加 30 条普通消息,窗口 20 → 剩 20 条,丢的是最早的
+- [x] system 消息永远在,不管加多少条
+- [x] assistant(tool_calls)+tool 一组不会被裁一半
 
 #### 2.4 常见卡点
 
@@ -2159,10 +2159,13 @@ public class ConversationMemory {
 
 **Day 2 打卡项**:
 
-- [ ] `ConversationMemory` 完成,滑动窗口 + 整组裁剪
-- [ ] 3 个单元测试全绿
-- [ ] 能口头回答「为什么不能无限追加消息」(三个理由)
-- [ ] git 提交:`git add -A && git commit -m "W3D2: ConversationMemory + 滑动窗口裁剪"`
+- [x] `ConversationMemory` 完成,滑动窗口 + 整组裁剪
+- [x] 3 个单元测试全绿
+- [x] 能口头回答「为什么不能无限追加消息」(三个理由)
+      - [x] Token 成本
+      - [x] 大语言模型上下文限制
+      - [x] 上下文过多容易幻觉
+- [x] git 提交:`git add -A && git commit -m "W3D2: ConversationMemory + 滑动窗口裁剪"`
 
 ---
 
