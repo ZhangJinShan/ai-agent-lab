@@ -1966,32 +1966,793 @@ new ScriptEngineManager().getEngineByName("js").eval(expression);
 
 ## 第 3 周:最小 Agent 内核
 
-把第 2 周的 demo 升级成一个像样的小框架(**这周写的东西,就是 Spring AI 里 ChatClient/ToolCallingManager 的雏形,学框架时你会秒懂**):
+**本周成果**:`lab03-agent-kernel` 模块 —— 把第 2 周的 demo 升级成一个像样的小框架:参数可配置、有对话记忆、能多轮聊天。**这周写的东西,就是 Spring AI 里 ChatClient/ToolCallingManager/ChatMemory 的雏形,学框架时你会秒懂。**
 
-- [ ] `AgentConfig`:system prompt、模型参数(temperature/max_tokens)、最大轮次,全部可配置
-- [ ] `ConversationMemory`:维护消息历史;实现**滑动窗口裁剪**(超过 N 条时丢最早的非 system 消息)——想想为什么不能无限追加?
-- [ ] `Agent` 类:对外只暴露 `String chat(String userInput)`,内部持有 registry + memory
-- [ ] **提示词模板**:system prompt 支持 `{date}` `{userName}` 之类的占位符替换
-- [ ] CLI 外壳:多轮对话 REPL,`/new` 清空历史,`/quit` 退出
+### 今天要干什么
 
-**自测点**:
+- [ ] **Day 1**:AgentConfig —— 参数可配置(temperature/max_tokens/最大轮次)
+- [ ] **Day 2**:ConversationMemory + 滑动窗口裁剪
+- [ ] **Day 3**:Agent 类重构 —— 对外只暴露 `chat()` + 提示词模板
+- [ ] **Day 4**:CLI 多轮 REPL(/new、/quit)
+- [ ] **Day 5**:temperature 对比实验 + README + 周自检
 
-- [ ] 连续问 20 轮,观察裁剪生效(打印当前 messages 条数)
-- [ ] 同一个输入在 temperature=0 和 1.0 下跑 5 次,记录差异(LLM 不确定性的第二课)
+**本周工程结构**:
+
+```
+ai-agent-lab/
+└── lab03-agent-kernel/                   ← 本周新模块
+    └── src/main/java/com/example/agent/
+        ├── LlmClient.java                ← 从 lab02 复制(继续复用你的资产)
+        ├── Tool.java / ToolRegistry.java ← 从 lab02 复制
+        ├── ToolCall.java / AssistantTurn.java ← 从 lab02 复制
+        ├── AgentConfig.java              ← Day 1:配置对象
+        ├── ConversationMemory.java       ← Day 2:消息历史 + 滑动窗口
+        ├── PromptTemplate.java           ← Day 3:占位符替换
+        ├── Agent.java                    ← Day 3:重构后的内核(本周心脏)
+        └── Main.java                     ← Day 4:多轮 REPL
+```
+
+> 又是复制 lab02 代码?——对,继续复用你自己的资产。但注意:**lab02 的 `Agent.run()` 本周会被拆开重构**(memory 从 run() 里抽出来、配置从硬编码变成 AgentConfig)——「重构自己写过的代码」本身就是后端工程师的核心技能。
+
+---
+
+### Day 1:AgentConfig —— 参数可配置(约 2 小时)
+
+**今天把散落的魔法值收进一个配置对象。** lab02 里 `MAX_ROUNDS = 8` 写死在代码里,temperature 压根没传——生产上不同场景(客服要严谨 vs 创意写作要发散)需要不同参数,这就是 AgentConfig 的意义。
+
+#### 1.1 先想清楚:哪些参数属于「Agent 配置」
+
+对照请求体想一遍(背下来,这些字段后面天天见):
+
+| 参数             | 含义                                | 不配会怎样                   |
+| -------------- | --------------------------------- | ----------------------- |
+| `temperature`  | 0.0 = 每次回答几乎一样(严谨);2.0 = 天马行空(发散) | 默认值因供应商而异,行为不可预期        |
+| `max_tokens`   | 单次回复的 token 上限                    | 模型可能写小作文,成本失控;也可能被默认值截断 |
+| `top_p`        | 和 temperature 二选一的采样参数            | 一般只调一个,别两个都动            |
+| `maxRounds`    | tool use 循环的最大轮次(你的 run() 里那个保险丝) | 模型可能无限调工具烧钱             |
+| `systemPrompt` | 角色设定                              | 模型没上下文,回答没约束            |
+
+#### 1.2 写 AgentConfig(30 分钟)
+
+**推荐用 builder 模式**——可选参数会不断变多,构造函数会失控(这是你熟的 Java 惯用法,顺手复习):
+
+```java
+package com.example.agent;
+
+public class AgentConfig {
+
+    private final String systemPrompt;
+    private final double temperature;   // 默认 0.7
+    private final Integer maxTokens;    // 可为 null(不传,用供应商默认)
+    private final int maxRounds;        // 默认 8
+
+    // 私有构造 + builder,TODO 自己写
+    //   AgentConfig config = AgentConfig.builder()
+    //       .systemPrompt("你是一个简洁的助手")
+    //       .temperature(0.3)
+    //       .maxRounds(10)
+    //       .build();
+
+    // 校验:temperature 落在 [0, 2];maxRounds >= 1;systemPrompt 非空
+    // 校验放 build() 里,不合格直接抛 IllegalArgumentException(和 LlmClient 判空一脉相承)
+}
+```
+
+#### 1.3 让 LlmClient 认识这些参数(30 分钟)
+
+`chatCompletions()` 的 body 里挂上 temperature/max_tokens(注意 `maxTokens` 为 null 时**不要放这个 key**,而不是放个 null 进去——服务端对 null 的处理五花八门):
+
+```java
+// 在 buildBody / chatCompletions 组装 body 处:
+body.put("temperature", config.temperature());
+if (config.maxTokens() != null) {
+    body.put("max_tokens", config.maxTokens());
+}
+```
+
+#### 1.4 验证(15 分钟)
+
+同一句输入,分别用 temperature=0 和 temperature=1.3 各跑 3 次,肉眼对比答案差异(今天先看现象,Day 5 做正式实验):
+
+- [x] temperature=0:三次回答高度相似
+- [x] temperature=1.3:三次回答明显不同
+
+#### 1.5 常见卡点
+
+| 现象                         | 原因 / 解法                                  |
+| -------------------------- | ---------------------------------------- |
+| temperature 传了没效果          | 部分模型(reasoning 模型)不支持或忽略 temperature——查供应商文档;换普通 chat 模型试 |
+| `max_tokens: null` 出现在请求体里 | `body.put` 没判 null;null 和「不传」是两回事        |
+| builder 校验不知道放哪            | 放 `build()` 里,构造前统一校验;对象一旦建出来就保证是合法的(不可变) |
+| 想把 maxRounds 也传给服务端        | 传不了——maxRounds 是**你本地循环**的保险丝,服务端不认识它    |
+
+**Day 1 打卡项**:
+
+- [x] `AgentConfig` builder 完成,含校验
+- [x] `LlmClient` 请求体带上 temperature/max_tokens(null 不传)
+- [x] temperature=0 / 1.3 对比跑通,现象记录在案
+- [x] git 提交:`git add -A && git commit -m "W3D1: AgentConfig 参数可配置"`
+
+---
+
+### Day 2:ConversationMemory + 滑动窗口裁剪(约 2 小时)
+
+**今天解决「多轮对话」的核心问题:记忆。** lab02 的 `run()` 每次都从空 messages 开始——问完就忘。今天实现 `ConversationMemory`,并且回答一个面试题级别的问题:**为什么不能无限追加消息?**
+
+#### 2.1 先想清楚:为什么不能无限追加
+
+三个理由(背下来,这就是「上下文工程」的第一课):
+
+1. **成本**:每次请求都把全部历史发给模型,第 20 轮的一次请求 = 为前 19 轮重复付费。token 是钱,历史越长越贵
+2. **上限**:模型上下文窗口有硬上限(如 128K token),超了直接报错或被截断
+3. **质量**:历史太长,模型注意力被稀释——早期的关键信息反而被忽略(「lost in the middle」)
+
+所以:**保留最近的、扔掉最久的**——这就是滑动窗口。
+
+#### 2.2 写 ConversationMemory(50 分钟)
+
+```java
+package com.example.agent;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 对话历史 + 滑动窗口裁剪。
+ * system 消息永远保留(它是人设,丢了就失忆了),其余超过 maxMessages 条时丢最早的。
+ */
+public class ConversationMemory {
+
+    private final int maxMessages;          // 窗口大小,如 20
+    private final List<Map<String, Object>> messages = new ArrayList<>();
+
+    public ConversationMemory(int maxMessages) {
+        // TODO: 校验 maxMessages >= 2(至少装得下一轮问答)
+    }
+
+    /** 追加一条消息,追加后触发裁剪 */
+    public void add(Map<String, Object> message) {
+        // TODO: add + trim
+    }
+
+    /** 返回当前全部消息(给 LlmClient 发请求用) */
+    public List<Map<String, Object>> messages() {
+        // TODO: 防御式拷贝,别把内部 list 暴露出去让人随便改
+    }
+
+    /** 清空历史(CLI 的 /new 命令用) */
+    public void clear() { messages.clear(); }
+
+    private void trim() {
+        // TODO: 滑动窗口核心逻辑:
+        //   while (非 system 消息数 > maxMessages) {
+        //       找到最早的非 system 消息,remove
+        //   }
+        // 提示:system 消息的识别 = role.equals("system")。
+        // 想清楚裁剪边界:tool 消息(tool_call_id)被裁掉一半会怎样?
+        //   → 协议要求 tool 消息必须紧跟对应的 assistant(tool_calls)。
+        //   保守做法:按「整组」裁剪 —— assistant(tool_calls)和它后面连续的 tool 消息
+        //   要么一起留,要么一起走(今天写个保守版,Day 4 观察裁剪日志验证)
+    }
+}
+```
+
+> **裁剪的「整组」边界是今天的灵魂**:第 2 周的协议红线说「tool 消息必须有对应的 assistant tool_calls」——窗口裁剪如果从中间把一组拆开,下一轮请求直接 400。这个坑今天不踩,第 5 周做 RAG 长文档时会加倍奉还。
+
+#### 2.3 单元测试(20 分钟,纯逻辑不调 LLM)
+
+用 lab01 的测试经验,给 `trim()` 写 3 个测试(不 mock 也行,memory 是纯逻辑):
+
+- [ ] 加 30 条普通消息,窗口 20 → 剩 20 条,丢的是最早的
+- [ ] system 消息永远在,不管加多少条
+- [ ] assistant(tool_calls)+tool 一组不会被裁一半
+
+#### 2.4 常见卡点
+
+| 现象                | 原因 / 解法                                  |
+| ----------------- | ---------------------------------------- |
+| 裁剪后服务端报 400       | tool 消息被拆散了——按「整组」裁剪(2.2 的灵魂)            |
+| system 消息被裁没了     | trim 只裁非 system;system 在初始化时放第一条         |
+| maxMessages 设多少合适 | 没有标准答案,20~50 之间起步;这是「上下文窗口预算」问题,第 8 周评估体系会量化它 |
+| 想按 token 数而不是条数裁剪 | 正确的生产做法!但依赖 tokenizer,今天先按条数,README 里记下这个 TODO |
+
+**Day 2 打卡项**:
+
+- [ ] `ConversationMemory` 完成,滑动窗口 + 整组裁剪
+- [ ] 3 个单元测试全绿
+- [ ] 能口头回答「为什么不能无限追加消息」(三个理由)
+- [ ] git 提交:`git add -A && git commit -m "W3D2: ConversationMemory + 滑动窗口裁剪"`
+
+---
+
+### Day 3:Agent 重构 + 提示词模板(约 2 小时)
+
+**本周的心脏:把 lab02 的 `run()` 重构成真正的内核。** 重构后对外只剩一个方法:`String chat(String userInput)` —— 调用方不需要知道 messages、tools、循环的存在。这就是「封装」在 Agent 世界的形态,也是 Spring AI `ChatClient` 的设计思路。
+
+#### 3.1 提示词模板 PromptTemplate(30 分钟)
+
+system prompt 支持 `{date}` `{userName}` 之类的占位符替换:
+
+```java
+package com.example.agent;
+
+import java.util.Map;
+
+/**
+ * 提示词模板:把模板里的 {key} 替换成实际值。
+ * 刻意用最简单的字符串替换实现 —— 提示词工程的本质是文本组装,不需要模板引擎。
+ */
+public class PromptTemplate {
+
+    private final String template;
+
+    public PromptTemplate(String template) {
+        this.template = template;
+    }
+
+    /** 渲染:把 {key} 全部替换成 values 里对应的值 */
+    public String render(Map<String, String> values) {
+        // TODO: 遍历 values,replace("{" + key + "}", value)
+        // 思考:模板里有 {xxx} 但 values 里没有 → 保留原样?抛异常?选一个并写注释说明为什么
+    }
+}
+```
+
+用法示例:
+
+```java
+new PromptTemplate("你是 {userName} 的助手,今天是 {date},回答要简洁")
+        .render(Map.of("userName", "老张", "date", LocalDate.now().toString()));
+```
+
+> 为什么不用 FreeMarker/Velocity?——提示词模板要的就是「替换字符串」,引模板引擎是杀鸡用牛刀,而且你的渲染对象就是 Map,不是复杂的对象图。**克制引依赖的冲动**,是工程成熟度的标志。
+
+#### 3.2 重构 Agent(60 分钟,今天的主体)
+
+```java
+package com.example.agent;
+
+import com.example.llm.LlmClient;
+
+import java.util.List;
+import java.util.Map;
+
+public class Agent {
+
+    private final LlmClient llm;
+    private final ToolRegistry registry;
+    private final AgentConfig config;
+    private final ConversationMemory memory;   // ← 新成员:记忆从 run() 里抽出来
+
+    public Agent(LlmClient llm, ToolRegistry registry, AgentConfig config) {
+        this.llm = llm;
+        this.registry = registry;
+        this.config = config;
+        this.memory = new ConversationMemory(config.maxMessages());
+    }
+
+    /**
+     * 对外唯一入口:多轮对话。内部自动维护记忆 + 处理工具调用。
+     */
+    public String chat(String userInput) {
+        // TODO 1: 用 PromptTemplate 渲染 systemPrompt,作为 system 消息
+        //         (只在 memory 为空时放一次,还是每次覆盖?想清楚:system 是「人设」,
+        //          每轮渲染新日期的话,应该先 clear 再放——今天选一种,写注释)
+
+        // TODO 2: memory.add(user 消息)
+
+        // TODO 3: 把 lab02 的 run() 循环搬进来,三处改造:
+        //   a) messages 不再自己 new,从 memory.messages() 拿
+        //   b) 每条新消息(assistant/tool)都 memory.add(...)
+        //   c) 循环上限用 config.maxRounds(),请求体带 config 的 temperature/max_tokens
+
+        // TODO 4: 返回最终答案
+    }
+
+    /** 记忆可见性:CLI 观察裁剪用 */
+    public int messageCount() { return memory.messages().size(); }
+
+    public void newConversation() { memory.clear(); }
+}
+```
+
+**重构 vs 重写**:把 lab02 的 run() 循环搬过来时,别删 lab02 —— 两个版本并存,README 里写清「lab02 是单轮内核,lab03 是带记忆的多轮内核」。对照 diff 看自己的代码进化,这是作品集的好素材。
+
+#### 3.3 验证:第一次真正的多轮对话(15 分钟)
+
+```java
+Agent agent = new Agent(llm, registry, config);
+System.out.println(agent.chat("我叫老张,记住这个名字"));
+System.out.println(agent.chat("我叫什么名字?"));   // 应答出「老张」——记忆生效!
+System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循环照样工作
+```
+
+#### 3.4 常见卡点
+
+| 现象                 | 原因 / 解法                                  |
+| ------------------ | ---------------------------------------- |
+| 第二轮问「我叫什么」答不出来     | user/assistant 消息没进 memory,只进了局部变量的 messages |
+| 每轮 system 消息重复堆积   | system 重复 add 进 memory——它应该只在开头放一次(或每轮覆盖,二选一写清楚) |
+| 多轮后工具突然不调了         | 裁剪把 tools 声明相关的上下文裁没了,或 tool 组被拆散——回看 Day 2 的整组裁剪 |
+| render 抛异常说找不到 key | 模板占位符和 values 的 key 不一致,打印渲染前的模板对照       |
+
+**Day 3 打卡项**:
+
+- [ ] `PromptTemplate` 完成,渲染策略(缺失占位符怎么办)有明确选择和注释
+- [ ] `Agent.chat()` 重构完成:memory 贯穿、config 生效、工具循环保留
+- [ ] 三段验证跑通:记名字 → 答名字 → 调工具
+- [ ] lab02 代码未删,两代内核并存
+- [ ] git 提交:`git add -A && git commit -m "W3D3: Agent 重构 + 提示词模板"`
+
+---
+
+### Day 4:CLI 多轮 REPL(约 2 小时)
+
+**今天给内核装上「产品外壳」。** 目标:一个能连续聊天的命令行,支持 `/new` 清空历史、`/quit` 退出,并且**能看到记忆裁剪生效**——这是今天的验收灵魂。
+
+#### 4.1 REPL 主循环(45 分钟)
+
+```
+> 你好,我叫老张
+你好老张!有什么可以帮你的?
+> 我叫什么?
+你叫老张。
+> /new
+(已开启新对话)
+> 北京今天天气怎么样?
+[调用工具] get_weather {"city":"北京"}
+[工具结果] 晴,25°C
+北京今天晴,25°C。
+> /quit
+```
+
+```java
+// Main 里的 REPL 骨架:
+//   Scanner(System.in) 读一行
+//   "/quit" → break
+//   "/new"  → agent.newConversation() + 提示
+//   其他    → agent.chat(line),打印答案
+//   每轮打印 messageCount() —— Day 5 验收裁剪要靠它
+```
+
+#### 4.2 观察裁剪生效(30 分钟,今天的验收灵魂)
+
+配置 `maxMessages = 10`,然后**连续问 20 轮简单问题**("1+1 等于几"、“你好" 之类),每轮打印 `messageCount()`:
+
+- [ ] 前几轮:messageCount 持续增长
+- [ ] 到达 10 附近:不再增长——裁剪开始工作
+- [ ] 第 20 轮问「我们最开始聊了什么」:答不出来(最早的已被裁掉)——**这就是滑动窗口的体感,值 10 分钟**
+- [ ] `/new` 后 messageCount 归零(或回到 system 一条)
+
+#### 4.3 升级流转日志(20 分钟)
+
+把第 2 周 Day 5 的「消息流转日志」升级:每轮多打一行「当前 messages=N 条(窗口=maxMessages)」。第 8 周做评估时,这个观测点会变成正式指标。
+
+#### 4.4 常见卡点
+
+| 现象                     | 原因 / 解法                                  |
+| ---------------------- | ---------------------------------------- |
+| 20 轮后 messageCount 还在涨 | trim 没被调用(add 后忘了 trim),或 maxMessages 没接进 memory |
+| REPL 卡在等输入             | 正常,Scanner 就是阻塞的;想看「打字机效果」可以接 chatStream(选做) |
+| 中文输入乱码                 | 终端编码,`-Dfile.encoding=UTF-8`             |
+| /new 之后模型还记得名字         | clear 没生效,或 systemPrompt 里写了 userName(模板把名字焊进人设了) |
+
+**Day 4 打卡项**:
+
+- [ ] REPL 三命令(/new /quit /正常输入)可用
+- [ ] 4.2 的四个观察点全部实际看到
+- [ ] 流转日志含 messageCount 观测
+- [ ] git 提交:`git add -A && git commit -m "W3D4: CLI 多轮 REPL"`
+
+---
+
+### Day 5:temperature 实验 + README + 周自检(约 2 小时)
+
+**今天做 LLM 不确定性的第二课(第一课是第 1 周 Day 4 的幻觉),然后把这周锁进保险箱。**
+
+#### 5.1 temperature 对比实验(40 分钟)
+
+**实验设计(先写下来再跑,这就是「控制变量」)**:
+
+- 固定:同一个问题(选个开放题,如「用一句话形容大海」)、同一个 systemPrompt、同一个模型
+- 变量:temperature = 0 / 0.7 / 1.3
+- 样本:每档跑 5 次,记录回答
+
+| temperature | 5 次回答的相似度(观察) | 结论   |
+| ----------- | ------------- | ---- |
+| 0           |               |      |
+| 0.7         |               |      |
+| 1.3         |               |      |
+
+把 5×3 共 15 条回答存进 `notes/temperature-experiment.md`,结论写进 README。**预期**:0 档几乎一样,1.3 档明显发散——「同一输入不同输出」不是 bug,是采样机制,这就是为什么生产上要 temperature=0(可复现)、评估要跑多次取均值(第 8 周会用到)。
+
+#### 5.2 写 README(30 分钟)
+
+```markdown
+# lab03-agent-kernel — 最小 Agent 内核
+
+带对话记忆的多轮 Agent:AgentConfig(配置) + ConversationMemory(滑动窗口) + Agent(内核) + CLI。
+
+## 我实现了什么
+- AgentConfig:builder + 校验,temperature/max_tokens/maxRounds 可配置
+- ConversationMemory:滑动窗口裁剪,system 保留,tool 组整组裁剪
+- Agent.chat():对外唯一入口,内聚记忆/工具/循环
+- PromptTemplate:{date}/{userName} 占位符渲染
+
+## 架构图(相比 lab02 多了 memory/config 两个方块)
+
+## temperature 实验结论(贴 5.1 的表)
+
+## 踩坑记录(挑 5 条)
+
+## 和 lab02 的对照(重构记录:run() → chat(),哪些设计变了,为什么)
+```
+
+#### 5.3 第 3 周收尾自检(20 分钟)
+
+- [ ] 合上文档,能徒手写出「滑动窗口裁剪」的逻辑(尤其整组裁剪为什么必要)?
+- [ ] Agent.chat() 一轮调用的消息流转(含 memory 读写),能不能画出来?
+- [ ] 为什么不能无限追加消息?三个理由能不能脱口而出?
+- [ ] 这周有没有哪段代码是复制粘贴的?有就删掉重打一遍
+
+**Day 5 打卡项**:
+
+- [ ] temperature 实验完成,表格和结论写进 README
+- [ ] README 按 5.2 骨架写完
+- [ ] 第 3 周自检 4 条全部诚实过关
+- [ ] git 提交:`git add -A && git commit -m "W3D5: temperature 实验 + README"`
+- [ ] 进度日志填第 3 周一行
+
+---
 
 ## 第 4 周:工程化
 
-- [ ] **结构化日志**:每轮请求/响应/工具调用写 JSON 日志(traceId 贯穿)
-- [ ] **Token 统计**:解析响应的 `usage` 字段(prompt/completion/total),会话结束打印汇总花费(按你所用模型的单价算钱)
-- [ ] **重试**:429/5xx 指数退避重试(手写,别用库);400 不重试——为什么?
-- [ ] **超时**:连接超时 / 读超时分别设置;流式调用的「静默超时」(N 秒没收到 chunk 就断)
-- [ ] 🐍 Python 侧:用 uv 跑一个官方 Agent SDK 或 LangGraph 的 quickstart,感受「框架帮你做了你这 4 周写的东西」
+**本周成果**:给 lab03 内核穿上生产级的「护甲」——日志、算钱、重试、超时。这周写的每一个功能,面试时都会被问「你的 Agent 怎么上生产?」,而你的答案是**代码**,不是概念。
+
+### 今天要干什么
+
+- [ ] **Day 1**:结构化日志(JSON + traceId 贯穿)
+- [ ] **Day 2**:Token 统计 + 算钱
+- [ ] **Day 3**:重试(手写指数退避)+ 错误分类
+- [ ] **Day 4**:超时体系(连接/读/流式静默超时)
+- [ ] **Day 5**:Python 对照(Agent SDK / LangGraph)+ 第一阶段验收
+
+> 本周全部改在 lab03 里进行,不建新模块。
+
+---
+
+### Day 1:结构化日志 + traceId(约 2 小时)
+
+**今天把「打印」升级成「日志」。** `System.out.println` 的三个致命伤:没法按级别过滤、没法机器解析、出问题时几十条日志串不到一起。今天用第 1 周引的 slf4j/logback(终于用上了),并让 **traceId 贯穿一次对话的全部日志**。
+
+#### 1.1 先想清楚:什么是 traceId,为什么要它
+
+**traceId = 一次对话(从用户输入到最终答案)的唯一编号**。为什么需要:线上一次对话产生几十条日志(每轮请求/响应/工具调用),多个用户并发时日志互相穿插——没有 traceId,你根本分不清哪条日志属于哪次对话。这就是分布式追踪(第 14 周 OpenTelemetry)的最小雏形。
+
+设计(背下来,MDC 的用法后面项目里天天见):
+
+```
+用户输入 → 生成 traceId(如 8 位随机 hex)→ 放进 logback 的 MDC
+  → 本次对话所有日志自动带上 traceId
+  → 对话结束 → MDC.remove(防止泄漏到下一次对话)
+```
+
+#### 1.2 写日志格式(30 分钟)
+
+`src/main/resources/logback.xml` —— **JSON 格式输出**(机器可解析,这是「结构化日志」的含义):
+
+```xml
+<!-- 关键配置:每行一条 JSON,含 timestamp/level/traceId/logger/message -->
+<!-- 最简实现:pattern 里用 %X{traceId} 引用 MDC 变量 -->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>{"ts":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%level","traceId":"%X{traceId}","logger":"%logger{20}","msg":"%msg"}%n</pattern>
+        </encoder>
+    </appender>
+    <root level="INFO"><appender-ref ref="STDOUT"/></root>
+</configuration>
+```
+
+> 不引 logstash-logback-encoder 之类的库?——pattern 方案 5 分钟搞定,够用;真上生产再换 encoder 库。**先跑通概念,再优化工具**,这个顺序别反。
+
+#### 1.3 接进 Agent(45 分钟)
+
+```java
+// Agent.chat() 开头:
+String traceId = UUID.randomUUID().toString().substring(0, 8);
+MDC.put("traceId", traceId);
+try {
+    log.info("对话开始 user={}", userInput);
+    // ... 每轮 log.info("轮次={} messages={}条", round, messages.size());
+    // ... 工具调用 log.info("工具={} args={} result={}", name, args, result);
+    return answer;
+} finally {
+    MDC.remove("traceId");   // 必须!否则 traceId 泄漏到下一次对话
+}
+```
+
+**升级点**:把 Day 3 里的 `System.out.println` 流转日志全部换成 `log.info`,Level 用法:info=正常流转、warn=工具出错被兜住、error=调用失败。
+
+#### 1.4 验证 + 卡点
+
+验证:跑一次带工具的对话,每行日志都带同一个 traceId;换一次对话,traceId 变了。
+
+| 现象                | 原因 / 解法                                  |
+| ----------------- | ---------------------------------------- |
+| 日志里 traceId 是空的   | MDC.put 没调用,或 logback pattern 里写错变量名     |
+| 连续两次对话 traceId 一样 | `finally` 里 MDC.remove 缺失                |
+| 日志不是 JSON         | logback.xml 没生效(检查在不在 classpath);或 pattern 里 msg 含换行把 JSON 拆行——msg 里的换行先 replace 掉 |
+| 想记录完整请求体/响应体      | 谨慎!里面有用户数据和 API Key 风险——只记摘要(前 200 字符),第 13 周脱敏专题细讲 |
+
+**Day 1 打卡项**:
+
+- [ ] JSON 格式日志输出,每行含 traceId
+- [ ] Agent 全链路日志(开始/轮次/工具/结束)level 使用正确
+- [ ] 两次对话 traceId 不同,同次对话内一致
+- [ ] git 提交:`git add -A && git commit -m "W4D1: 结构化日志 + traceId"`
+
+---
+
+### Day 2:Token 统计 + 算钱(约 2 小时)
+
+**今天让 Agent 会「记账」。** 不会算钱的 Agent 上生产等于开了一张空白支票——回答质量没提升,账单先爆了。目标:解析每次响应的 `usage` 字段,会话结束打印汇总花费。
+
+#### 2.1 先看清楚 usage 长什么样(10 分钟)
+
+第 1 周 Day 2 的响应原文里就有它(回去翻一眼):
+
+```json
+"usage": {
+  "prompt_tokens": 19,
+  "completion_tokens": 135,
+  "total_tokens": 154
+}
+```
+
+三个指标(背下来,面试「成本怎么控」的开场白):`prompt_tokens`(你发过去的,含历史)、`completion_tokens`(模型生成的)、`total_tokens`(两者之和)。**计费一般是两者单价不同**(生成比输入贵 2~10 倍)。
+
+#### 2.2 写 TokenUsage 累计器(50 分钟)
+
+```java
+package com.example.agent;
+
+import java.util.concurrent.atomic.LongAdder;
+
+/** Token 账本:线程安全(虚拟线程时代的好习惯),跨多轮累加 */
+public class TokenUsage {
+
+    private final LongAdder promptTokens = new LongAdder();
+    private final LongAdder completionTokens = new LongAdder();
+    private final LongAdder calls = new LongAdder();
+
+    /** 从响应 JSON 的 usage 节点提取并累加。TODO:缺字段时按 0 计,别 NPE */
+    public void record(com.fasterxml.jackson.databind.JsonNode usageNode) {
+        // TODO
+    }
+
+    public long totalTokens() { return promptTokens.sum() + completionTokens.sum(); }
+
+    /**
+     * 按单价算钱。
+     * TODO: pricePerMillionPrompt / pricePerMillionCompletion 传入(单位:元/百万 token)
+     *   花费 = prompt/1_000_000 * 单价1 + completion/1_000_000 * 单价2
+     * 单价从供应商价格页查(DeepSeek/Qwen 都是元/百万 token 计价),写进配置而不是硬编码
+     */
+    public String bill(double pricePerMillionPrompt, double pricePerMillionCompletion) {
+        // TODO
+    }
+}
+```
+
+#### 2.3 接进 Agent + 会话汇总(30 分钟)
+
+- `chat()` 每次调用后 `usage.record(root.path("usage"))`
+- CLI 的 `/quit` 和 `/new` 时打印:`本次会话:调用 N 次,prompt X tokens,completion Y tokens,花费约 ¥Z`
+- **注意工具循环**:一轮 chat() 内部可能调了 3 次 LLM,每次的 usage 都要记——账本漏记就是白算
+
+#### 2.4 验证 + 卡点
+
+验证:故意跑一个「北京和上海哪个热」的多轮工具场景,手工用计算器核对账单公式。
+
+| 现象                    | 原因 / 解法                                  |
+| --------------------- | ---------------------------------------- |
+| usage 全是 0            | 流式响应的 usage 在最后一个 chunk 里(第 1 周 Day 3 见过!);非流式才在主响应里 |
+| 算出来的钱和供应商账单对不上        | 单价单位错了:元/百万 token vs 元/千 token,差 1000 倍——这是真实事故高发区 |
+| reasoning 模型的思考 token | completion_tokens_details 里的 reasoning_tokens 也计费——要不要单独列?建议单独打印,贵得明明白白 |
+| 想按天/按月统计              | 生产上接 Prometheus,今天先打日志,第 14 周指标面板见       |
+
+**Day 2 打卡项**:
+
+- [ ] `TokenUsage` 累计器完成,多轮/多工具调用不漏记
+- [ ] 会话结束打印汇总(次数/tokens/花费)
+- [ ] 手工核对过一次账单公式
+- [ ] git 提交:`git add -A && git commit -m "W4D2: Token 统计 + 算钱"`
+
+---
+
+### Day 3:重试 —— 手写指数退避(约 2 小时)
+
+**今天补上「网络不可靠」这一课。** 目标:429/5xx 自动重试(指数退避,**手写,不许用库**);并且把第 1 周 Day 4 埋的「错误分类」伏笔收回来:**400 不重试,为什么?**
+
+#### 3.1 先想清楚:哪些错误该重试(今天的理论核心)
+
+**错误分类表**(和第 1 周 Day 4 的「截断 vs 格式错」一脉相承——同一个下游症状,处理方式完全不同):
+
+| 错误                        | 重试?   | 为什么                               |
+| ------------------------- | ----- | --------------------------------- |
+| 429 限流                    | ✅ 重试  | 过一会就好了(退避正好让出配额)                  |
+| 5xx 服务端抖动                 | ✅ 重试  | 服务端临时故障                           |
+| 连接超时/读超时                  | ✅ 重试  | 网络抖动                              |
+| 400 请求体不合法                | ❌ 不重试 | **你的请求本身有 bug,重试一万次还是 400**       |
+| 401/403 鉴权失败              | ❌ 不重试 | key 错了,重试不会变对                     |
+| `finish_reason=length` 截断 | ❌ 不重试 | 同样输入同样 max_tokens,还是截断(第 1 周的伏笔!) |
+
+一句话:**「重试能改变结果的才重试」**。盲目重试不仅浪费,还会放大故障(429 时疯狂重试 = 继续冲垮自己)。
+
+#### 3.2 手写指数退避(50 分钟)
+
+**什么是指数退避**(概念先懂):第 1 次失败等 1 秒重试,第 2 次等 2 秒,第 3 次等 4 秒……等待时间指数增长 + **随机抖动**(jitter,否则一堆客户端同时醒过来继续打爆服务端——「惊群」)。
+
+```java
+package com.example.agent;
+
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
+
+/** 手写重试:指数退避 + 抖动。不许用 guava-retrying / spring-retry */
+public class RetryExecutor {
+
+    private final int maxAttempts;     // 如 3 次
+    private final long baseDelayMs;    // 如 1000ms
+
+    public RetryExecutor(int maxAttempts, long baseDelayMs) { ... }
+
+    /**
+     * 执行 action,失败时按「可重试错误」判断 + 指数退避。
+     * TODO 核心逻辑:
+     *   for (attempt = 1; attempt <= maxAttempts; attempt++) {
+     *       try { return action.get(); }
+     *       catch (Exception e) {
+     *           if (attempt == maxAttempts || !isRetryable(e)) throw e;
+     *           long delay = baseDelayMs * (1L << (attempt - 1));   // 1s, 2s, 4s
+     *           delay += ThreadLocalRandom.current().nextLong(delay / 2);  // 抖动
+     *           log.warn("第 {} 次失败:{},{}ms 后重试", attempt, e.getMessage(), delay);
+     *           Thread.sleep(delay);
+     *       }
+     *   }
+     */
+
+    /** TODO: 错误分类。提示:第 1 周的 throwLlmError 把状态码拼进了 message,
+     *  更好的做法是定义 LlmException(statusCode),今天顺手重构它 */
+    private boolean isRetryable(Exception e) {
+        // LlmException → statusCode 是 429/5xx 或超时 → true;400/401/403 → false
+    }
+}
+```
+
+#### 3.3 重构 + 验证(20 分钟)
+
+**顺手重构**:第 1 周的 `throwLlmError` 把状态码埋在 message 字符串里——今天定义 `LlmException(int statusCode, String body)`,`isRetryable` 判类型而不是 `message.contains("429")`。这就是「从字符串地狱到类型系统」的微小进化。
+
+**验证(不许只测成功路径)**:把 baseUrl 指到不存在的端口(超时)、用错误 key(401,不该重试)、FakeLlmServer 加个「前两次返 500 第三次成功」的剧本——三个路径都要看到预期行为。
+
+| 现象                           | 原因 / 解法                                  |
+| ---------------------------- | ---------------------------------------- |
+| 重试了 401                      | isRetryable 没排除 4xx 客户端错误(除了 429)        |
+| 重试风暴,日志疯狂刷屏                  | 抖动没加,或 maxAttempts 设太大;生产上还要加「熔断」,第 12 周见 |
+| sleep 被 InterruptedException | catch 后恢复中断标志 `Thread.currentThread().interrupt()`,别吞 |
+| 想用 Spring 的 @Retryable       | 第 14 周之后随便用;今天手写是为了理解它内部就这点东西            |
+
+**Day 3 打卡项**:
+
+- [ ] `RetryExecutor` 手写完成(指数退避 + 抖动 + 错误分类)
+- [ ] `LlmException` 重构完成,状态码在类型里
+- [ ] 三条验证路径(500 重试成功 / 401 不重试 / 超时重试)全部实际跑过
+- [ ] git 提交:`git add -A && git commit -m "W4D3: 重试 + 错误分类"`
+
+---
+
+### Day 4:超时体系(约 2 小时)
+
+**今天把「等」变成可控的。** 没有超时的 HTTP 调用 = 线程被无限挂起 = 线程池打满 = 全站雪崩——这是后端的基本功,平移到 LLM 世界依然成立,还多了一种 LLM 特有的超时:**流式静默超时**。
+
+#### 4.1 三种超时先分清(20 分钟,概念)
+
+| 超时                     | 控制什么                | 现状(对照 lab03 的 LlmClient) |
+| ---------------------- | ------------------- | ------------------------ |
+| 连接超时 connectTimeout    | TCP 握手等多久           | 已有(10s,第 1 周写的)          |
+| 请求/读超时 request timeout | 整个请求(含生成)等多久        | 已有(60s)——但它对**流式**不够用!   |
+| **流式静默超时**             | 两个 chunk 之间隔多久没动静就断 | **没有,今天补**               |
+
+为什么流式需要第三种:60s 总超时下,模型可以 59 秒不吐字(用户盯着空白屏幕)。正确的产品行为:**超过 N 秒(如 10s)没收到任何 chunk 就断开报错**——等的是「持续有进展」,不是「总时长」。
+
+#### 4.2 实现流式静默超时(60 分钟,今天的主体)
+
+思路:**给每次「收到 chunk」盖时间戳,消费线程检查「距上一个 chunk 是否超时」**。最简实现(单线程消费下):
+
+```java
+// chatStream() 里,消费 ofLines() 流的循环改造:
+//   long lastChunkTime = System.currentTimeMillis();
+//   for (String line : lines) {
+//       long silentMs = System.currentTimeMillis() - lastChunkTime;
+//       if (silentMs > silentTimeoutMs) {
+//           throw new LlmTimeoutException("流式静默超时:" + silentMs + "ms 没收到 chunk");
+//       }
+//       lastChunkTime = System.currentTimeMillis();
+//       ... 原有解析逻辑
+//   }
+```
+
+> **今天先用「单线程检查」的近似实现**(它有盲区:阻塞在 `hasNext()` 上时检查不到超时,README 里如实记下这个局限)。生产级方案是「看门狗线程 / CompletableFuture.orTimeout / 虚拟线程 + 独立计时」,第 12 周可靠性工程里升级——**知道近似实现的边界,比假装完美更有价值**。
+
+#### 4.3 超时和重试的组合(20 分钟)
+
+把昨天的 RetryExecutor 和今天的超时接起来:**超时算可重试错误**(网络抖动),但重试预算要收紧——流式超时重试 2 次就好,别让用户等 3 轮超时。
+
+配置收进 AgentConfig:`connectTimeoutMs` / `requestTimeoutMs` / `silentTimeoutMs` —— Day 1 的 builder 今天扩展三个字段。
+
+#### 4.4 验证 + 卡点
+
+验证:FakeLlmServer 加剧本「发一个 chunk 后 sleep 15 秒」,配 silentTimeoutMs=10s,确认 10 秒左右报「静默超时」而不是干等到 60s。
+
+| 现象         | 原因 / 解法                               |
+| ---------- | ------------------------------------- |
+| 静默超时从来不触发  | 检查逻辑放在阻塞读之后,永远等不到——近似实现的盲区,README 记下  |
+| 正常慢回答被误杀   | silentTimeout 太紧;生成慢的模型放 15~30s       |
+| 三种超时设成同一个值 | 不同含义不同预算:连接 5~10s、请求 60s、静默 10~30s    |
+| 超时后想看断在哪   | 异常里带「已收到 N 个 chunk / 静默 M ms」,排查省一半时间 |
+
+**Day 4 打卡项**:
+
+- [ ] 流式静默超时实现(近似版),FakeLlmServer 剧本验证过
+- [ ] AgentConfig 三个超时字段,预算各不相同
+- [ ] 超时错误接入 RetryExecutor,重试预算收紧
+- [ ] 近似实现的局限写进 README(诚实记录)
+- [ ] git 提交:`git add -A && git commit -m "W4D4: 超时体系"`
+
+---
+
+### Day 5:Python 对照 + 第一阶段验收(约 2 小时)
+
+**今天感受「框架的力量」,然后验收第一阶段。** 用 uv 跑一个官方 Agent SDK 或 LangGraph 的 quickstart——你会发现:**框架帮你做了你这 4 周手写的一切**。这次你是「知道自己在省什么」的人,这是你和「只会调 SDK」的人的本质区别。
+
+#### 5.1 Python 对照(60 分钟)
+
+```bash
+mkdir lab03-py && cd lab03-py
+uv init --python 3.12
+uv add langgraph        # 或 claude-agent-sdk,二选一
+```
+
+跑 LangGraph 官方 quickstart(工具调用版),然后对照(写进笔记,面试素材):
+
+| 你 4 周手写的                 | 框架里对应什么                   | 你现在的理解             |
+| ------------------------ | ------------------------- | ------------------ |
+| chatCompletions + SSE 解析 | `ChatModel` 封装            | 协议层:全是一个 HTTP POST |
+| Tool + ToolRegistry      | `@tool` 装饰器 / ToolNode    | 声明 + 分发            |
+| run() 循环                 | 图节点循环 / agent executor    | 「模型要工具→执行→喂回」      |
+| ConversationMemory       | Checkpointer / ChatMemory | 滑动窗口 vs 摘要 vs 向量记忆 |
+| RetryExecutor / 超时       | 框架内置 resilience           | 原理就是指数退避           |
+| traceId 日志               | LangSmith / Langfuse 追踪   | MDC → 分布式 trace    |
+
+#### 5.2 第一阶段交付物验收(40 分钟)
 
 ### 📦 第一阶段交付物(打勾才进第二阶段)
 
 - [ ] 仓库 lab01~lab03 代码可运行,README 完整
 - [ ] **合上文档,能在 2 小时内手写出 tool use 循环**(做不到就重写一遍第 2 周代码)
 - [ ] 一张自己画的「Agent 消息流转图」,能给同事讲明白
+- [ ] (补充)lab03 的 memory 裁剪和 config 设计,能说清每处取舍的理由
+
+**加码验收(强烈建议)**:找个同事/朋友,15 分钟讲清楚「Agent 就是一个 while 循环 + 一份变长的消息列表」+ 流转图。讲不卡壳 = 第一阶段真过了。
+
+#### 5.3 收尾
+
+- [ ] README 补 lab03 最终形态
+- [ ] 三周进度日志补全(这就是你转行叙事的原始素材)
+- [ ] git 提交:`git add -A && git commit -m "W4D5: Python 对照 + 第一阶段验收"`
 
 ---
 
