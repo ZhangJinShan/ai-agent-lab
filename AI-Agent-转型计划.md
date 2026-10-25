@@ -2415,7 +2415,7 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 
 ### 今天要干什么
 
-- [ ] **Day 1**:结构化日志(JSON + traceId 贯穿)
+- [x] **Day 1**:结构化日志(JSON + traceId 贯穿)
 - [ ] **Day 2**:Token 统计 + 算钱
 - [ ] **Day 3**:重试(手写指数退避)+ 错误分类
 - [ ] **Day 4**:超时体系(连接/读/流式静默超时)
@@ -2491,10 +2491,10 @@ try {
 
 **Day 1 打卡项**:
 
-- [ ] JSON 格式日志输出,每行含 traceId
-- [ ] Agent 全链路日志(开始/轮次/工具/结束)level 使用正确
-- [ ] 两次对话 traceId 不同,同次对话内一致
-- [ ] git 提交:`git add -A && git commit -m "W4D1: 结构化日志 + traceId"`
+- [x] JSON 格式日志输出,每行含 traceId
+- [x] Agent 全链路日志(开始/轮次/工具/结束)level 使用正确
+- [x] 两次对话 traceId 不同,同次对话内一致
+- [x] git 提交:`git add -A && git commit -m "W4D1: 结构化日志 + traceId"`
 
 ---
 

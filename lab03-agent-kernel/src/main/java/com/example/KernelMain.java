@@ -3,10 +3,12 @@ package com.example;
 import com.example.agent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.InputStream;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.UUID;
 
 /**
  * @author zhangjinshan
@@ -15,10 +17,9 @@ import java.util.Scanner;
  **/
 public class KernelMain {
 
-    private static Logger logger = LoggerFactory.getLogger(KernelMain.class);
+    private static final Logger logger = LoggerFactory.getLogger(KernelMain.class);
 
     public static void main(String[] args) {
-
         // 初始化配置管理器
         AgentConfig agentConfig = initAgentConfig();
         if (null == agentConfig) {
@@ -32,37 +33,36 @@ public class KernelMain {
             return;
         }
 
-//        // 初始化工工具注册器
-//        ToolRegistry registry = initToolRegistry();
-//
-//        // 初始化对话记忆器
-//        ConversationMemory memory = new ConversationMemory(10);
-//
-//        // 调用 Agent
-//        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
-//
-//        Scanner scanner = new Scanner(System.in);
-//        while (true) {
-//            String userInput = scanner.nextLine();
-//            if ("/new".equals(userInput)) {
-//                agent.newConversation();
-//                logger.info("已开启新会话....");
-//                continue;
-//            }
-//            if ("/quit".equals(userInput)) {
-//                logger.info("会话已结束，欢迎下次再来！");
-//                break;
-//            }
-//            String response = agent.chat(userInput);
-//            logger.info(response);
-//        }
+        // 初始化工工具注册器
+        ToolRegistry registry = initToolRegistry();
 
-        for (int i = 0; i < 5; i++) {
-            String response = llmClient.chat("你是一个智能助手,回答要简洁准确，如果不知道就直接回答不知道，不要捏造答案", "你是谁？");
-            logger.info("response -> {}", response);
+        // 初始化对话记忆器
+        ConversationMemory memory = new ConversationMemory(10);
+
+        // 调用 Agent
+        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
+
+        Scanner scanner = new Scanner(System.in);
+        while (scanner.hasNextLine()) {
+            String userInput = scanner.nextLine();
+            // 一次用户输入 = 一次请求 = 一个 traceId
+            MDC.put("traceId", UUID.randomUUID().toString().replace("-", ""));
+            try {
+                if ("/new".equals(userInput)) {
+                    agent.newConversation();
+                    logger.info("已开启新会话....");
+                    continue;
+                }
+                if ("/quit".equals(userInput)) {
+                    logger.info("会话已结束，欢迎下次再来！");
+                    break;
+                }
+                String response = agent.chat(userInput);
+                logger.info(response);
+            } finally {
+                MDC.remove("traceId"); // 清除 traceId
+            }
         }
-
-
     }
 
     private static LlmClient initLlmClient(AgentConfig agentConfig) {
@@ -73,7 +73,7 @@ public class KernelMain {
         // 2. 读环境变量里的 api-key
         String apiKey = System.getenv("LLM_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            System.err.println("请先设置环境变量 LLM_API_KEY(设置后需重启 IDE/终端)");
+            logger.error("请先设置环境变量 LLM_API_KEY(设置后需重启 IDE/终端)");
             return null;
         }
         return new LlmClient(properties.getProperty("llm.baseUrl"), properties.getProperty("llm.model"), apiKey, agentConfig);
@@ -117,7 +117,7 @@ public class KernelMain {
         Properties properties = new Properties();
         try (InputStream in = KernelMain.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (in == null) {
-                System.err.println("找不到 application.properties,检查文件是否在 src/main/resources 下");
+                logger.error("找不到 application.properties,检查文件是否在 src/main/resources 下");
                 return null;
             }
             properties.load(in);

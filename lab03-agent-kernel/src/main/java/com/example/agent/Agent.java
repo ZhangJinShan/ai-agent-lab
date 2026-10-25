@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * @author zhangjinshan
@@ -42,6 +44,10 @@ public class Agent {
      * @return
      */
     public String chat(String userInput){
+        boolean ownTrace = MDC.get("traceId") == null;
+        if (ownTrace) {
+            MDC.put("traceId", UUID.randomUUID().toString().replace("-", ""));
+        }
         // system 只在记忆为空时加入一次:newConversation() 清空后,下次 chat 自动补回
         if (memory.messages().isEmpty()) {
             memory.add(Map.of("role", "system", "content", config.getSystemPrompt()));
@@ -56,7 +62,6 @@ public class Agent {
                 executeRounds ++;
 
                 logger.info("[轮次 {}] 当前 messages={} 条", round + 1, messageCount());
-                logger.info("[轮次 {}] 请求 messages = {} 条", round + 1, messageCount());
                 // 1. 调用 llm
                 String response = llm.chatCompletions(memory.messages(), registry.toToolsJson());
                 JsonNode root = null;
@@ -94,6 +99,9 @@ public class Agent {
             return "已达到最大轮次限制,任务未完成。";
         } finally {
             logger.info("── Agent 结束: 共 {} 轮,调用工具 {} 次 ──────", executeRounds, toolCallCount);
+            if (ownTrace) {
+                MDC.remove("traceId");
+            }
         }
     }
 

@@ -1,0 +1,10 @@
+<!-- 关键配置:每行一条 JSON,含 timestamp/level/traceId/logger/message -->
+<!-- 最简实现:pattern 里用 %X{traceId} 引用 MDC 变量 -->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>{"ts":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%level","traceId":"%X{traceId}","logger":"%logger{20}","msg":"%msg"}%n</pattern>
+        </encoder>
+    </appender>
+    <root level="INFO"><appender-ref ref="STDOUT"/></root>
+</configuration>
