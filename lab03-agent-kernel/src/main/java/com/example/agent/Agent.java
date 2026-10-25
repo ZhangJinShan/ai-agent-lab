@@ -54,8 +54,9 @@ public class Agent {
         try {
             for (int round = 0; round < config.getMaxRounds(); round++) {
                 executeRounds ++;
-                logger.info("[轮次 {}] 请求 messages = {} 条", round + 1, messageCount());
 
+                logger.info("[轮次 {}] 当前 messages={} 条", round + 1, messageCount());
+                logger.info("[轮次 {}] 请求 messages = {} 条", round + 1, messageCount());
                 // 1. 调用 llm
                 String response = llm.chatCompletions(memory.messages(), registry.toToolsJson());
                 JsonNode root = null;

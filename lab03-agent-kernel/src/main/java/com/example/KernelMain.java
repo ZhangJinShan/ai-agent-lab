@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.util.Properties;
+import java.util.Scanner;
 
 /**
  * @author zhangjinshan
@@ -40,9 +41,21 @@ public class KernelMain {
         // 调用 Agent
         Agent agent = new Agent(llmClient, registry, agentConfig, memory);
 
-        logger.info(agent.chat("我叫老张,记住这个名字"));
-        logger.info(agent.chat("我叫什么名字?"));
-        logger.info(agent.chat("北京和上海哪个温度高?"));
+       Scanner scanner = new Scanner(System.in);
+       while (true) {
+           String userInput = scanner.nextLine();
+           if ("/new".equals(userInput)) {
+               agent.newConversation();
+               logger.info("已开启新会话....");
+               continue;
+           }
+           if ("/quit".equals(userInput)) {
+               logger.info("会话已结束，欢迎下次再来！");
+               break;
+           }
+           String response = agent.chat(userInput);
+           logger.info(response);
+       }
     }
 
     private static LlmClient initLlmClient(AgentConfig agentConfig) {

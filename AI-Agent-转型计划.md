@@ -2323,10 +2323,10 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 
 配置 `maxMessages = 10`,然后**连续问 20 轮简单问题**("1+1 等于几"、“你好" 之类),每轮打印 `messageCount()`:
 
-- [ ] 前几轮:messageCount 持续增长
-- [ ] 到达 10 附近:不再增长——裁剪开始工作
-- [ ] 第 20 轮问「我们最开始聊了什么」:答不出来(最早的已被裁掉)——**这就是滑动窗口的体感,值 10 分钟**
-- [ ] `/new` 后 messageCount 归零(或回到 system 一条)
+- [x] 前几轮:messageCount 持续增长
+- [x] 到达 10 附近:不再增长——裁剪开始工作
+- [x] 第 20 轮问「我们最开始聊了什么」:答不出来(最早的已被裁掉)——**这就是滑动窗口的体感,值 10 分钟**
+- [x] `/new` 后 messageCount 归零(或回到 system 一条)
 
 #### 4.3 升级流转日志(20 分钟)
 
@@ -2343,10 +2343,10 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 
 **Day 4 打卡项**:
 
-- [ ] REPL 三命令(/new /quit /正常输入)可用
-- [ ] 4.2 的四个观察点全部实际看到
-- [ ] 流转日志含 messageCount 观测
-- [ ] git 提交:`git add -A && git commit -m "W3D4: CLI 多轮 REPL"`
+- [x] REPL 三命令(/new /quit /正常输入)可用
+- [x] 4.2 的四个观察点全部实际看到
+- [x] 流转日志含 messageCount 观测
+- [x] git 提交:`git add -A && git commit -m "W3D4: CLI 多轮 REPL"`
 
 ---
 
