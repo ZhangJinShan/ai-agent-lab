@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 public class ConversationMemoryTest {
 
     /**
-     * 清单 1:加 30 条普通消息,窗口 20 → 剩 20 条,丢的是最早的
+     * 测试案例:加 30 条普通消息,窗口 20 → 剩 20 条,丢的是最早的(清单 1)
      */
     @Test
-    void 测试1_加30条普通消息_窗口20_剩20条且丢最早的() {
+    void testAdd30MessagesKeepsWindow20AndDropsOldest() {
         // given: 窗口大小 20
         ConversationMemory memory = new ConversationMemory(20);
 
@@ -34,10 +34,10 @@ public class ConversationMemoryTest {
     }
 
     /**
-     * 清单 2:system 消息永远在,不管加多少条
+     * 测试案例:system 消息永远在,不管加多少条(清单 2)
      */
     @Test
-    void 测试2_system消息永远保留_不管加多少条() {
+    void testSystemMessageAlwaysSurvivesTrim() {
         // given: 窗口 20,开头一条 system(人设)
         ConversationMemory memory = new ConversationMemory(20);
         memory.add(msg("system", "你是一个智能助手"));
@@ -55,13 +55,13 @@ public class ConversationMemoryTest {
     }
 
     /**
-     * 清单 3:assistant(tool_calls)+tool 一组不会被裁一半
+     * 测试案例:assistant(tool_calls)+tool 一组不会被裁一半(清单 3)
      * 造一个「按条裁会出孤儿、按组裁才正确」的现场:
      *   裁剪要丢 2 条最早的普通消息(q1、a1),整组工具消息必须完整活下来。
      *   如果 trim 只按条数裁,会把组头 assistant(tool_calls) 裁掉、留下孤儿 tool。
      */
     @Test
-    void 测试3_assistant带tool_calls和tool结果_一组不被裁一半() {
+    void testToolCallGroupIsNeverSplitByTrim() {
         // given: 窗口 3;历史:system + q1 + a1 + [组头 assistant(tool_calls) + 组员 tool] + a2
         ConversationMemory memory = new ConversationMemory(3);
         memory.add(msg("system", "你是一个智能助手"));

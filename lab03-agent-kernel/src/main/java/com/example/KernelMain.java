@@ -1,7 +1,6 @@
 package com.example;
 
-import com.example.agent.AgentConfig;
-import com.example.agent.LlmClient;
+import com.example.agent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,20 +17,82 @@ public class KernelMain {
     private static Logger logger = LoggerFactory.getLogger(KernelMain.class);
 
     public static void main(String[] args) {
+
+        // 初始化配置管理器
+        AgentConfig agentConfig = initAgentConfig();
+        if (null == agentConfig) {
+            logger.error("agentConfig init error");
+        }
+
         // 初始化 llmClient
-        LlmClient llmClient = initLlmClient();
+        LlmClient llmClient = initLlmClient(agentConfig);
         if (null == llmClient) {
-            logger.error("llmClient init fail");
+            logger.error("llmClient init error");
             return;
         }
-        for (int i = 0; i < 3; i++) {
-            String response = llmClient.chat("你是一个简洁的助手", "你好,请用一句话介绍你自己");
-            logger.info("response -> {}", response);
-        }
+
+        // 初始化工工具注册器
+        ToolRegistry registry = initToolRegistry();
+
+        // 初始化对话记忆器
+        ConversationMemory memory = new ConversationMemory(10);
+
+        // 调用 Agent
+        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
+
+        logger.info(agent.chat("我叫老张,记住这个名字"));
+        logger.info(agent.chat("我叫什么名字?"));
+        logger.info(agent.chat("北京和上海哪个温度高?"));
     }
 
-    private static LlmClient initLlmClient() {
+    private static LlmClient initLlmClient(AgentConfig agentConfig) {
         // 1. 对 classpath 下的 application.properties 文件
+        Properties properties = getProperties();
+        if (properties == null) return null;
+
+        // 2. 读环境变量里的 api-key
+        String apiKey = System.getenv("LLM_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            System.err.println("请先设置环境变量 LLM_API_KEY(设置后需重启 IDE/终端)");
+            return null;
+        }
+        return new LlmClient(properties.getProperty("llm.baseUrl"), properties.getProperty("llm.model"), apiKey, agentConfig);
+    }
+
+    /**
+     * 初始化工具注册器
+     * @return
+     */
+    private static ToolRegistry initToolRegistry() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(
+                new Tool(
+                        "get_weather",
+                        "查询指定城市的当前天气",
+                        "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
+                        ToolFunction :: getWeather)
+        );
+        registry.register(
+                new Tool(
+                        "calculate",
+                        "计算用户提供的表达式的结果并返回",
+                        "{\"type\":\"object\",\"properties\":{\"expression\":{\"type\":\"string\",\"description\":\"表达式\"}},\"required\":[\"expression\"]}",
+                        ToolFunction :: calculate)
+        );
+        return registry;
+    }
+    
+    private static AgentConfig initAgentConfig() {
+        Properties properties = getProperties();
+        if (properties == null) return null;
+
+        return AgentConfig.builder()
+                .systemPrompt("你是一个智能助手,回答要简洁准确，如果不知道就直接回答不知道，不要捏造答案")
+                .temperature(Double.parseDouble(properties.getProperty("llm.temperature")))
+                .build();
+    }
+
+    private static Properties getProperties() {
         Properties properties = new Properties();
         try (InputStream in = KernelMain.class.getClassLoader().getResourceAsStream("application.properties")){
             if (in == null) {
@@ -42,19 +103,6 @@ public class KernelMain {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
-        // 2. 读环境变量里的 api-key
-        String apiKey = System.getenv("LLM_API_KEY");
-        if (apiKey == null || apiKey.isBlank()) {
-            System.err.println("请先设置环境变量 LLM_API_KEY(设置后需重启 IDE/终端)");
-            return null;
-        }
-
-        // 3. 初始化 AgentConfig
-        AgentConfig agentConfig = AgentConfig.builder()
-                .temperature(Double.parseDouble(properties.getProperty("llm.temperature")))
-                .build();
-
-        return new LlmClient(properties.getProperty("llm.baseUrl"), properties.getProperty("llm.model"), apiKey, agentConfig);
+        return properties;
     }
 }

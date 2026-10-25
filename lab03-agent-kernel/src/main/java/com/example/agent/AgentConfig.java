@@ -46,13 +46,16 @@ public class AgentConfig {
         }
 
         public AgentConfig build() {
+            if (systemPrompt == null || systemPrompt.isEmpty()) {
+                throw new IllegalArgumentException("systemPrompt 不能为空");
+            }
             if (temperature == null || temperature < 0 || temperature > 2) {
                 throw new IllegalArgumentException("temperature 必须在 0-2 之间");
             }
-            if (maxRounds != null && maxRounds <= 0) {
+            if (maxRounds == null || maxRounds <= 0) {
                 throw new IllegalArgumentException("maxRounds 必须大于0");
             }
-            if (maxTokens != null && maxTokens <= 0) {
+            if (maxTokens == null || maxTokens <= 0) {
                 throw new IllegalArgumentException("maxTokens 必须大于0");
             }
             return new AgentConfig(systemPrompt, temperature, maxTokens, maxRounds);

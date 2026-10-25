@@ -1970,8 +1970,8 @@ new ScriptEngineManager().getEngineByName("js").eval(expression);
 
 ### 今天要干什么
 
-- [ ] **Day 1**:AgentConfig —— 参数可配置(temperature/max_tokens/最大轮次)
-- [ ] **Day 2**:ConversationMemory + 滑动窗口裁剪
+- [x] **Day 1**:AgentConfig —— 参数可配置(temperature/max_tokens/最大轮次)
+- [x] **Day 2**:ConversationMemory + 滑动窗口裁剪
 - [ ] **Day 3**:Agent 类重构 —— 对外只暴露 `chat()` + 提示词模板
 - [ ] **Day 4**:CLI 多轮 REPL(/new、/quit)
 - [ ] **Day 5**:temperature 对比实验 + README + 周自检
@@ -2282,11 +2282,11 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 
 **Day 3 打卡项**:
 
-- [ ] `PromptTemplate` 完成,渲染策略(缺失占位符怎么办)有明确选择和注释
-- [ ] `Agent.chat()` 重构完成:memory 贯穿、config 生效、工具循环保留
-- [ ] 三段验证跑通:记名字 → 答名字 → 调工具
-- [ ] lab02 代码未删,两代内核并存
-- [ ] git 提交:`git add -A && git commit -m "W3D3: Agent 重构 + 提示词模板"`
+- [x] `PromptTemplate` 完成,渲染策略(缺失占位符怎么办)有明确选择和注释
+- [x] `Agent.chat()` 重构完成:memory 贯穿、config 生效、工具循环保留
+- [x] 三段验证跑通:记名字 → 答名字 → 调工具
+- [x] lab02 代码未删,两代内核并存
+- [x] git 提交:`git add -A && git commit -m "W3D3: Agent 重构 + 提示词模板"`
 
 ---
 

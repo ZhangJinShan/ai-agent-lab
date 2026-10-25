@@ -15,17 +15,20 @@ public record AssistantTurn(String content, List<ToolCall> toolCalls) {
     public Map<String, Object> toMessage(){
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("role", "assistant");
-        message.put("content", content);
-
-        List<Map<String, Object>> tools = new LinkedList<>();
-        for (ToolCall toolCall : toolCalls) {
-            Map<String, Object> tool = new LinkedHashMap<>();
-            tool.put("id", toolCall.id());
-            tool.put("type", "function");
-            tool.put("function", Map.of("name", toolCall.name(), "arguments", toolCall.argsJson()));
-            tools.add(tool);
+        if (null != content && !content.isEmpty()) {
+            message.put("content", content);
         }
-        message.put("tool_calls", tools);
+        if (!toolCalls.isEmpty()) {
+            List<Map<String, Object>> tools = new LinkedList<>();
+            for (ToolCall toolCall : toolCalls) {
+                Map<String, Object> tool = new LinkedHashMap<>();
+                tool.put("id", toolCall.id());
+                tool.put("type", "function");
+                tool.put("function", Map.of("name", toolCall.name(), "arguments", toolCall.argsJson()));
+                tools.add(tool);
+            }
+            message.put("tool_calls", tools);
+        }
         return message;
     }
 }
