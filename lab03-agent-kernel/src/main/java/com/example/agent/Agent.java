@@ -31,11 +31,14 @@ public class Agent {
 
     private final ConversationMemory memory;
 
-    public Agent(LlmClient llm, ToolRegistry registry, AgentConfig config, ConversationMemory memory) {
+    private final TokenUsage tokenUsage;
+
+    public Agent(LlmClient llm, ToolRegistry registry, AgentConfig config, ConversationMemory memory, TokenUsage tokenUsage) {
         this.llm = llm;
         this.registry = registry;
         this.config = config;
         this.memory = memory;
+        this.tokenUsage = tokenUsage;
     }
 
     /**
@@ -70,6 +73,9 @@ public class Agent {
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException("LLM 响应不是合法 JSON: " + response, e);
                 }
+                // 统计 token 用度
+                tokenUsage.record(root.path("usage"));
+
                 AssistantTurn assistantTurn = parseAssistantTurn(root);
                 List<ToolCall> toolCalls = assistantTurn.toolCalls();
 

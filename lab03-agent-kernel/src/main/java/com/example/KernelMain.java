@@ -20,14 +20,21 @@ public class KernelMain {
     private static final Logger logger = LoggerFactory.getLogger(KernelMain.class);
 
     public static void main(String[] args) {
+        // 加载配置文件 properties
+        Properties properties = getProperties();
+        if (null == properties) {
+            logger.error("找不到 application.properties,检查文件是否在 src/main/resources 下");
+            return;
+        }
+
         // 初始化配置管理器
-        AgentConfig agentConfig = initAgentConfig();
+        AgentConfig agentConfig = initAgentConfig(properties);
         if (null == agentConfig) {
             logger.error("agentConfig init error");
         }
 
         // 初始化 llmClient
-        LlmClient llmClient = initLlmClient(agentConfig);
+        LlmClient llmClient = initLlmClient(agentConfig, properties);
         if (null == llmClient) {
             logger.error("llmClient init error");
             return;
@@ -39,8 +46,15 @@ public class KernelMain {
         // 初始化对话记忆器
         ConversationMemory memory = new ConversationMemory(10);
 
+        // 初始化 TokenUsage
+        TokenUsage tokenUsage = new TokenUsage();
+
         // 调用 Agent
-        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
+        Agent agent = new Agent(llmClient, registry, agentConfig, memory, tokenUsage);
+
+        double pricePerMillionPrompt = Double.parseDouble(properties.getProperty("price.prompt"));
+
+        double pricePerMillionCompletion = Double.parseDouble(properties.getProperty("price.completion"));
 
         Scanner scanner = new Scanner(System.in);
         while (scanner.hasNextLine()) {
@@ -50,10 +64,21 @@ public class KernelMain {
             try {
                 if ("/new".equals(userInput)) {
                     agent.newConversation();
+                    logger.info("本次会话:调用 {} 次,prompt {} tokens,completion {} tokens,花费约 ¥{}",
+                            tokenUsage.calls(),
+                            tokenUsage.promptTokens(),
+                            tokenUsage.completionTokens(),
+                            tokenUsage.bill(pricePerMillionPrompt, pricePerMillionCompletion));
+                    tokenUsage.reset();
                     logger.info("已开启新会话....");
                     continue;
                 }
                 if ("/quit".equals(userInput)) {
+                    logger.info("本次会话:调用 {} 次,prompt {} tokens,completion {} tokens,花费约 ¥{}",
+                            tokenUsage.calls(),
+                            tokenUsage.promptTokens(),
+                            tokenUsage.completionTokens(),
+                            tokenUsage.bill(pricePerMillionPrompt, pricePerMillionCompletion));
                     logger.info("会话已结束，欢迎下次再来！");
                     break;
                 }
@@ -65,9 +90,8 @@ public class KernelMain {
         }
     }
 
-    private static LlmClient initLlmClient(AgentConfig agentConfig) {
+    private static LlmClient initLlmClient(AgentConfig agentConfig, Properties properties) {
         // 1. 对 classpath 下的 application.properties 文件
-        Properties properties = getProperties();
         if (properties == null) return null;
 
         // 2. 读环境变量里的 api-key
@@ -103,8 +127,7 @@ public class KernelMain {
         return registry;
     }
 
-    private static AgentConfig initAgentConfig() {
-        Properties properties = getProperties();
+    private static AgentConfig initAgentConfig(Properties properties) {
         if (properties == null) return null;
 
         return AgentConfig.builder()

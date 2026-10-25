@@ -2416,7 +2416,7 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 ### 今天要干什么
 
 - [x] **Day 1**:结构化日志(JSON + traceId 贯穿)
-- [ ] **Day 2**:Token 统计 + 算钱
+- [x] **Day 2**:Token 统计 + 算钱
 - [ ] **Day 3**:重试(手写指数退避)+ 错误分类
 - [ ] **Day 4**:超时体系(连接/读/流式静默超时)
 - [ ] **Day 5**:Python 对照(Agent SDK / LangGraph)+ 第一阶段验收
@@ -2568,10 +2568,10 @@ public class TokenUsage {
 
 **Day 2 打卡项**:
 
-- [ ] `TokenUsage` 累计器完成,多轮/多工具调用不漏记
-- [ ] 会话结束打印汇总(次数/tokens/花费)
-- [ ] 手工核对过一次账单公式
-- [ ] git 提交:`git add -A && git commit -m "W4D2: Token 统计 + 算钱"`
+- [x] `TokenUsage` 累计器完成,多轮/多工具调用不漏记
+- [x] 会话结束打印汇总(次数/tokens/花费)
+- [x] 手工核对过一次账单公式
+- [x] git 提交:`git add -A && git commit -m "W4D2: Token 统计 + 算钱"`
 
 ---
 
