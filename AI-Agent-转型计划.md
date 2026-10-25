@@ -1972,9 +1972,9 @@ new ScriptEngineManager().getEngineByName("js").eval(expression);
 
 - [x] **Day 1**:AgentConfig —— 参数可配置(temperature/max_tokens/最大轮次)
 - [x] **Day 2**:ConversationMemory + 滑动窗口裁剪
-- [ ] **Day 3**:Agent 类重构 —— 对外只暴露 `chat()` + 提示词模板
-- [ ] **Day 4**:CLI 多轮 REPL(/new、/quit)
-- [ ] **Day 5**:temperature 对比实验 + README + 周自检
+- [x] **Day 3**:Agent 类重构 —— 对外只暴露 `chat()` + 提示词模板
+- [x] **Day 4**:CLI 多轮 REPL(/new、/quit)
+- [x] **Day 5**:temperature 对比实验 + README + 周自检
 
 **本周工程结构**:
 
