@@ -125,3 +125,72 @@ eval 等于把「任意代码执行」的钥匙交给用户:模型输出受 prom
 - **assistant 消息是历史凭证,不许改写**——接口无状态,每次请求带全量 messages;`assistant(tool_calls)` 是模型自己开的单,后面的 `tool` 结果靠 `tool_call_id` 与它配对成因果链。改了 arguments、id 或丢字段,轻则模型困惑/重复调用,重则 id 配对失败直接协议报错。
 
 一句话总结:arguments 当**输入**时要解析校验(不信任),当**历史**时要原样回传(不篡改)——一个道理的两面。
+
+# lab03-agent-kernel — 最小 Agent 内核
+
+带对话记忆的多轮 Agent:AgentConfig(配置) + ConversationMemory(滑动窗口) + Agent(内核) + CLI。
+
+## 我实现了什么
+- AgentConfig:builder + 校验,temperature/max_tokens/maxRounds 可配置
+- ConversationMemory:滑动窗口裁剪,system 保留,tool 组整组裁剪
+- Agent.chat():对外唯一入口,内聚记忆/工具/循环
+- PromptTemplate:{date}/{userName} 占位符渲染
+- 单测:ConversationMemoryTest(3 个)+ PromptTemplateTest(5 个),覆盖裁剪不变量和渲染三策略
+
+## 架构图(相比 lab02 多了 memory/config 两个方块)
+
+```
+    KernelMain
+        │
+        ├── AgentConfig(builder:systemPrompt / temperature / maxTokens / maxRounds)
+        ├── ToolRegistry(get_weather / calculate)
+        ├── ConversationMemory(maxMessages 滑动窗口)
+        └── LlmClient(同一份 config → temperature/max_tokens 进请求体)
+                │
+                ▼
+    Agent.chat(userInput)  ←── 对外唯一入口
+        │
+        ├─ memory 为空才补 system(一次性) + 追加 user
+        ├─ 循环(round < config.maxRounds):
+        │     llm.chatCompletions(memory.messages(), tools)
+        │        → assistant(含 tool_calls)原样追回 memory
+        │        → 无 tool_calls → 返回 content(最终答案)
+        │        → 有 tool_calls → registry.execute → tool 结果(带 tool_call_id)追回 → 下一轮
+        └─ 超轮次 → "已达到最大轮次限制,任务未完成。"
+```
+
+memory 贯穿所有 chat() 调用:第 2 问能看到第 1 问的对话;newConversation() 清空后下次 chat 自动补回 system。
+
+## temperature 实验结论(贴 5.1 的表)
+
+同一句输入,temperature=0 和 1.3 各跑 3 次,肉眼对比:
+
+| 设置 | 3 次表现 | 适用场景 |
+| --- | --- | --- |
+| temperature=0 | 三次回答高度相似 | 严谨/事实类(客服问答、数据提取) |
+| temperature=1.3 | 三次回答明显不同 | 创意发散(文案、头脑风暴),输出不可控 |
+| 默认 0.7 | 折中 | 通用对话 |
+
+结论:temperature 是「严谨 ↔ 发散」的旋钮,不是质量旋钮——要稳定选 0,要花样选高,要可预期别选高。注意部分 reasoning 模型会忽略 temperature(传了没效果先查供应商文档)。
+
+## 踩坑记录(挑 5 条)
+
+1. Builder 的 build() 一开始写到了外层 AgentConfig 上——链式调用 .build() 编译不过;build() 是 Builder 的职责,return 的是产品不是工厂
+2. 校验忘了防包装类型拆箱:`.maxRounds(null)` 穿透 build(),chat() 里 `round < config.getMaxRounds()` 直接 NPE——默认值救不了显式传 null
+3. tool 消息键名写成 `tool_id`,协议标准是 `tool_call_id`——服务端宽容只是运气,严格后端会按 id 配对失败
+4. system 每次 chat() 都追加一条,忘了 memory 保证 system 永不裁——长期无限堆积;改成「记忆为空才补一次」
+5. 测试期望值写死日期("今天是 2026-10-25"),当天绿、第二天红——期望值要用 LocalDate.now() 动态拼
+
+## 和 lab02 的对照(重构记录:run() → chat(),哪些设计变了,为什么)
+
+| lab02 | lab03 | 为什么 |
+| --- | --- | --- |
+| run(systemPrompt, userMessage) 无状态,每次从零开始 | chat(userInput) + 贯穿的 ConversationMemory | 要做多轮记忆:第 2 问要看到第 1 问 |
+| MAX_ROUNDS=8 魔法值写死 | AgentConfig.maxRounds 可配 | 场景不同参数不同,收进配置对象 |
+| temperature 没传 | config 的 temperature/max_tokens 进请求体(null 不放 key) | 采样行为可调 |
+| system prompt 每次当参数传 | config.getSystemPrompt(),memory 为空才入一次 | 人设是配置不是消息,重复添加会堆积 |
+| 工具循环:解析 → 原样追回 → execute → tool 回喂 | 原样保留 | lab02 的心脏,动不得 |
+| AssistantTurn 解析 | 保留,修正 tool_id → tool_call_id | 协议红线:assistant(tool_calls) 与 tool 按 id 配对 |
+| 无 | ConversationMemory 滑动窗口(system 永留、tool 组整组裁) | 上下文有限;tool 组裁一半会出孤儿 tool |
+| 无 | PromptTemplate 占位符渲染(缺失 key 抛异常) | 提示词模板化,变量缺失早失败 |
+| 无 | AgentConfig builder + 校验 | 参数可配置第一步 |

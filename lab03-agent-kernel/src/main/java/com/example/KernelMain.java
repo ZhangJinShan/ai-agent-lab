@@ -32,30 +32,37 @@ public class KernelMain {
             return;
         }
 
-        // 初始化工工具注册器
-        ToolRegistry registry = initToolRegistry();
+//        // 初始化工工具注册器
+//        ToolRegistry registry = initToolRegistry();
+//
+//        // 初始化对话记忆器
+//        ConversationMemory memory = new ConversationMemory(10);
+//
+//        // 调用 Agent
+//        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
+//
+//        Scanner scanner = new Scanner(System.in);
+//        while (true) {
+//            String userInput = scanner.nextLine();
+//            if ("/new".equals(userInput)) {
+//                agent.newConversation();
+//                logger.info("已开启新会话....");
+//                continue;
+//            }
+//            if ("/quit".equals(userInput)) {
+//                logger.info("会话已结束，欢迎下次再来！");
+//                break;
+//            }
+//            String response = agent.chat(userInput);
+//            logger.info(response);
+//        }
 
-        // 初始化对话记忆器
-        ConversationMemory memory = new ConversationMemory(10);
+        for (int i = 0; i < 5; i++) {
+            String response = llmClient.chat("你是一个智能助手,回答要简洁准确，如果不知道就直接回答不知道，不要捏造答案", "你是谁？");
+            logger.info("response -> {}", response);
+        }
 
-        // 调用 Agent
-        Agent agent = new Agent(llmClient, registry, agentConfig, memory);
 
-       Scanner scanner = new Scanner(System.in);
-       while (true) {
-           String userInput = scanner.nextLine();
-           if ("/new".equals(userInput)) {
-               agent.newConversation();
-               logger.info("已开启新会话....");
-               continue;
-           }
-           if ("/quit".equals(userInput)) {
-               logger.info("会话已结束，欢迎下次再来！");
-               break;
-           }
-           String response = agent.chat(userInput);
-           logger.info(response);
-       }
     }
 
     private static LlmClient initLlmClient(AgentConfig agentConfig) {
@@ -74,6 +81,7 @@ public class KernelMain {
 
     /**
      * 初始化工具注册器
+     *
      * @return
      */
     private static ToolRegistry initToolRegistry() {
@@ -83,18 +91,18 @@ public class KernelMain {
                         "get_weather",
                         "查询指定城市的当前天气",
                         "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"城市名\"}},\"required\":[\"city\"]}",
-                        ToolFunction :: getWeather)
+                        ToolFunction::getWeather)
         );
         registry.register(
                 new Tool(
                         "calculate",
                         "计算用户提供的表达式的结果并返回",
                         "{\"type\":\"object\",\"properties\":{\"expression\":{\"type\":\"string\",\"description\":\"表达式\"}},\"required\":[\"expression\"]}",
-                        ToolFunction :: calculate)
+                        ToolFunction::calculate)
         );
         return registry;
     }
-    
+
     private static AgentConfig initAgentConfig() {
         Properties properties = getProperties();
         if (properties == null) return null;
@@ -107,7 +115,7 @@ public class KernelMain {
 
     private static Properties getProperties() {
         Properties properties = new Properties();
-        try (InputStream in = KernelMain.class.getClassLoader().getResourceAsStream("application.properties")){
+        try (InputStream in = KernelMain.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (in == null) {
                 System.err.println("找不到 application.properties,检查文件是否在 src/main/resources 下");
                 return null;
