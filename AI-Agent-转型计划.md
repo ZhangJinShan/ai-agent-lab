@@ -2417,7 +2417,7 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 
 - [x] **Day 1**:结构化日志(JSON + traceId 贯穿)
 - [x] **Day 2**:Token 统计 + 算钱
-- [ ] **Day 3**:重试(手写指数退避)+ 错误分类
+- [x] **Day 3**:重试(手写指数退避)+ 错误分类
 - [ ] **Day 4**:超时体系(连接/读/流式静默超时)
 - [ ] **Day 5**:Python 对照(Agent SDK / LangGraph)+ 第一阶段验收
 
@@ -2706,6 +2706,121 @@ public class RetryExecutor {
 | 正常慢回答被误杀   | silentTimeout 太紧;生成慢的模型放 15~30s       |
 | 三种超时设成同一个值 | 不同含义不同预算:连接 5~10s、请求 60s、静默 10~30s    |
 | 超时后想看断在哪   | 异常里带「已收到 N 个 chunk / 静默 M ms」,排查省一半时间 |
+
+#### 4.5 落地步骤(结合 lab03 现有代码,按顺序做,约 100 分钟)
+
+**第 1 步:新建 `LlmTimeoutException`(10 分钟)**
+
+```java
+package com.example.agent;
+
+/** 流式静默超时:一段时间没收到任何 chunk。属于「网络类」错误,可重试 */
+public class LlmTimeoutException extends RuntimeException {
+    public LlmTimeoutException(String message) { super(message); }
+}
+```
+
+**顺手改 `RetryExecutor.isRetryable()`**——有个坑:isRetryable 对 `RuntimeException` 默认返回 `false`,而 `LlmTimeoutException` 是 RuntimeException,不加进去它**永远不会被重试**。在 cause 链遍历里加一条:
+
+```java
+if (t instanceof LlmTimeoutException) {
+    return true;   // 静默超时 = 网络/服务端抖动,重试能改变结果
+}
+```
+
+> 体会 W4D3 埋的伏笔今天的收获:`isRetryable` 判的是**类型**而不是 `message.contains(...)`——今天加一种错误分类只要加一个 `instanceof`,这就是类型系统的价值。
+
+**第 2 步:`AgentConfig` 加三个超时字段(20 分钟)**
+
+在现有 builder 里加三个字段,模式照抄 `maxTokens`:
+
+```java
+private final Long connectTimeoutMs;   // 默认 5_000(连接要快,5s 还连不上就是网络有问题)
+private final Long requestTimeoutMs;   // 默认 60_000(生成慢,给足)
+private final Long silentTimeoutMs;    // 默认 15_000(慢思考模型给 15~30s)
+```
+
+builder 方法 + `build()` 校验:三个都必须 > 0,并且**语义校验**:`silentTimeoutMs < requestTimeoutMs`(静默预算不该比总预算还大,否则这个字段没意义——这种「配置之间的一致性校验」是很值钱的工程细节)。
+
+**第 3 步:把硬编码超时接进配置(15 分钟)**
+
+两处改动:
+
+1. **`connectTimeout` 有个陷阱**:`httpClient` 是字段直接初始化的,它在构造函数执行**之前**就初始化完了,拿不到 `agentConfig`。要把 HttpClient 的构建**挪到构造函数里**,赋值给字段:
+
+```java
+// 构造函数里:
+this.httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofMillis(agentConfig.getConnectTimeoutMs()))
+        .build();
+```
+
+2. `getHttpRequest()` 里把硬编码的 `Duration.ofSeconds(60)` 换成 `Duration.ofMillis(agentConfig.getRequestTimeoutMs())`。
+
+**第 4 步:`chatStream()` 加静默超时(40 分钟,今天主体)**
+
+思路:**给每次「收到行」盖时间戳,消费循环里检查「距上一行是否超时」**。改造消费 `ofLines()` 流的 for 循环:
+
+```java
+long lastActivity = System.currentTimeMillis();
+for (String line : lines) {
+    long silentMs = System.currentTimeMillis() - lastActivity;
+    if (silentMs > agentConfig.getSilentTimeoutMs()) {
+        // 异常里带上现场信息,排查省一半时间
+        throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
+    }
+    lastActivity = System.currentTimeMillis();   // 收到行 = 有进展,盖章
+    // ... 原有的 startsWith("data: ") / [DONE] / delta 解析逻辑不动
+}
+```
+
+**两个必须写进 README 的诚实认知**:
+
+1. **这是近似实现,有盲区**:如果服务端**一个 chunk 都不发**,消费线程会阻塞在 `hasNext()`/`iterator.next()` 上,检查根本没机会执行——此时兜底的是第 3 步的 `requestTimeoutMs`。生产级方案是「看门狗线程 / `CompletableFuture.orTimeout` / 虚拟线程 + 独立计时」,第 12 周升级。**知道近似实现的边界,比假装完美更有价值**。
+2. 近似版能抓住的是「发了几个 chunk 之后突然沉默」——这恰好是产品上最痛的场景(用户已经看到字在蹦,突然卡住),虽不完美但很实用。
+
+**第 5 步:超时 × 重试组合(10 分钟)**
+
+1. **超时算可重试错误**(第 1 步已做)。但注意 `chatStream` 现在只把 `send()` 包在 `retryExecutor.execute()` 里,静默超时发生在**消费行流阶段**,在重试圈外面——要把「发送 + 消费」都包进去。
+2. **重试预算收紧**:流式超时让用户等 3 轮超时是灾难。给流式路径单独一个 `RetryExecutor(2, 1000)`(重试 2 次就好),`LlmClient` 里加第二个字段 `streamRetryExecutor`。
+
+> **一个要想清楚的 trade-off(写进笔记,面试可聊)**:流式超时重试整个请求时,`onToken` 可能已经吐出去一部分字了,重试会**重复吐**。三个选择:① 接受重复(CLI demo 可以);② buffer 到成功再吐(失去流式意义);③ 只对「一个 token 都没吐出去就超时」的情况重试。今天选 ① 或 ③ 并写注释说明,这就是工程取舍。
+
+#### 4.6 FakeLlmServer 剧本 + 测试(25 分钟)
+
+FakeLlmServer 目前只有 401/500/正常三个剧本,**还没有流式剧本**——补一个 `TRIGGER_SLOW_STREAM`:
+
+```java
+// 场景 d(流式慢速):发一个 chunk → sleep 15s → 再发剩下的
+if (reqBody.contains("TRIGGER_SLOW_STREAM")) {
+    exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+    exchange.sendResponseHeaders(200, 0);   // 0 = chunked 传输
+    try (OutputStream os = exchange.getResponseBody()) {
+        os.write("data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n\n".getBytes(StandardCharsets.UTF_8));
+        os.flush();                          // 必须 flush!不然攒在缓冲区,客户端收不到
+        Thread.sleep(15_000);                // 沉默 15 秒
+        os.write("data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n\n".getBytes(StandardCharsets.UTF_8));
+        os.flush();
+        os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+        os.flush();
+    }
+    return;
+}
+```
+
+**验证剧本**:
+
+1. **静默超时触发**:`silentTimeoutMs = 10_000`,触发 `TRIGGER_SLOW_STREAM`,预期 ~10s 后抛 `LlmTimeoutException`(不是干等 15s 把流走完,更不是等 60s 请求超时)。**注意它会先吐出「你」字,然后超时**——正好观察第 5 步讲的重复吐问题
+2. **重试生效**:断言 `retryExecutor.getLastAttemptCount()` 符合预期
+3. **正常流式不受影响**:一个正常速度的流式剧本,确认静默超时**不误杀**
+
+#### 4.7 补充卡点
+
+| 现象                              | 原因 / 解法                                  |
+| ------------------------------- | ---------------------------------------- |
+| `LlmTimeoutException` 抛了但没重试    | `isRetryable` 没加这个类型,默认落到「return false 不重试」分支 |
+| FakeLlmServer 客户端一直等不到第一个 chunk | 流式响应忘了 `os.flush()`,数据攒在缓冲区              |
+| HttpClient 构建报「拿不到 config」      | 字段初始化发生在构造函数前,要挪进构造函数(第 3 步)             |
 
 **Day 4 打卡项**:
 

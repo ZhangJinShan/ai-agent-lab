@@ -106,6 +106,9 @@ public class RetryExecutor {
             if (t instanceof JsonProcessingException) {
                 return false; // 响应数据本身坏了，重试还是坏
             }
+            if (t instanceof LlmTimeoutException) {
+                return true; // 静默超时 = 网络/服务端抖动,重试能改变结果
+            }
             if (t instanceof HttpTimeoutException || t instanceof ConnectException || t instanceof IOException) {
                 return true; // 超时 / 连接被拒 / 连接重置 -> 网络抖动
             }

@@ -11,9 +11,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.temporal.TemporalUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -25,9 +27,7 @@ import java.util.stream.Stream;
  **/
 public class LlmClient {
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    private final HttpClient httpClient;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -59,6 +59,9 @@ public class LlmClient {
         this.apiKey = apiKey;
         this.agentConfig = agentConfig;
         this.retryExecutor = retryExecutor;
+        httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(agentConfig.getConnectTimeoutMs()))
+                .build();
     }
 
     public String chat(String systemPrompt, String userMessage){
@@ -87,7 +90,14 @@ public class LlmClient {
             boolean done = false;
             String prefix = "data: ";
             Iterable<String> lines = () -> response.body().iterator();
+            long lastActivity = System.currentTimeMillis();
             for (String line : lines) {
+                long silentMs = System.currentTimeMillis() - lastActivity;
+                if (silentMs > agentConfig.getSilentTimeoutMs()) {
+                    // 异常里带上现场信息,排查省一半时间
+                    throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
+                }
+                lastActivity = System.currentTimeMillis();   // 收到行 = 有进展
                 if (done || !line.startsWith(prefix)) {
                     continue;
                 }
@@ -228,7 +238,7 @@ public class LlmClient {
 
         return HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/chat/completions"))
-                .timeout(Duration.ofSeconds(60)) // LLM 生成耗时长,10 秒不够用
+                .timeout(Duration.ofMillis(agentConfig.getRequestTimeoutMs())) // LLM 生成耗时长,10 秒不够用
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + apiKey)      // Bearer 后面有空格!
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
