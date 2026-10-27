@@ -39,7 +39,14 @@ public class LlmClient {
 
     private final AgentConfig agentConfig;
 
+    private final RetryExecutor retryExecutor;
+
     public LlmClient(String baseUrl, String model, String apiKey,  AgentConfig agentConfig) {
+        // 默认:最多 3 次,首退避 1 秒(实际 1s→2s→4s,加抖动)
+        this(baseUrl, model, apiKey, agentConfig, new RetryExecutor(3, 1000));
+    }
+
+    public LlmClient(String baseUrl, String model, String apiKey,  AgentConfig agentConfig, RetryExecutor retryExecutor) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("baseUrl 不能为空");
         }
@@ -51,18 +58,16 @@ public class LlmClient {
         this.model = model;
         this.apiKey = apiKey;
         this.agentConfig = agentConfig;
+        this.retryExecutor = retryExecutor;
     }
 
     public String chat(String systemPrompt, String userMessage){
         Map<String, Object> body = buildBody(systemPrompt, userMessage, false);
-        try {
+        return retryExecutor.execute(() -> {
             HttpRequest request = getHttpRequest(body);
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
             return parseChatResponse(response);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        });
     }
 
     public void chatStream(String systemPrompt, String userMessage, Consumer<String> onToken){
@@ -71,12 +76,14 @@ public class LlmClient {
         try {
             HttpRequest request = getHttpRequest(body);
 
-            HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
-
-            if (response.statusCode() != 200) {
-                // 注意!出错时响应体不是 SSE,是普通 JSON 错误,得先把行拼回来看
-                throwLlmError(response.statusCode(), response.body().collect(Collectors.joining()));
-            }
+            HttpResponse<Stream<String>> response = retryExecutor.execute(() -> {
+                HttpResponse<Stream<String>> res = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+                if (res.statusCode() != 200) {
+                    // 注意!出错时响应体不是 SSE,是普通 JSON 错误,得先把行拼回来看
+                    throwLlmError(res.statusCode(), res.body().collect(Collectors.joining()));
+                }
+                return res;
+            });
             boolean done = false;
             String prefix = "data: ";
             Iterable<String> lines = () -> response.body().iterator();
@@ -124,17 +131,15 @@ public class LlmClient {
     }
 
     public Resume chatExtractJson(String systemPrompt, String userText){
-        Map<String, Object> body = buildBody(systemPrompt, userText, false);
-        body.put("response_format", Map.of("type", "json_object"));
-        body.put("max_tokens", 50);
-        try {
+        return retryExecutor.execute(() -> {
+            Map<String, Object> body = buildBody(systemPrompt, userText, false);
+            body.put("response_format", Map.of("type", "json_object"));
+            body.put("max_tokens", 50);
             HttpRequest httpRequest = getHttpRequest(body);
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             String content = parseChatResponse(response);
             return mapper.readValue(content, Resume.class);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        });
     }
 
     /**
@@ -144,7 +149,7 @@ public class LlmClient {
      * @return
      */
     public String chatCompletions(List<Map<String, Object>> messages, String toolsJson){
-        try {
+        return retryExecutor.execute(() -> {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
             body.put("messages", messages);
@@ -163,13 +168,8 @@ public class LlmClient {
                 throwLlmError(response.statusCode(), response.body());
             }
             return response.body();
-        } catch (Exception e) {
-            throw new RuntimeException("LLM 调用失败: " + e.getMessage(), e);
-        }
-
+        });
     }
-
-
 
     private String parseChatResponse(HttpResponse<String> response) throws JsonProcessingException {
         if (response.statusCode() != 200) {
@@ -220,7 +220,7 @@ public class LlmClient {
 
     /** 统一的非 200 错误处理:errBody 超长只保留前 500 字符 */
     private void throwLlmError(int statusCode, String errBody) {
-        throw new RuntimeException("LLM 调用失败,HTTP " + statusCode + ": " + errBody.substring(0, Math.min(errBody.length(), 500)));
+        throw new LlmException(statusCode, errBody);
     }
 
     private HttpRequest getHttpRequest(Map<String, Object> body) throws JsonProcessingException {

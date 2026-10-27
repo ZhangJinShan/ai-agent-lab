@@ -2650,10 +2650,10 @@ public class RetryExecutor {
 
 **Day 3 打卡项**:
 
-- [ ] `RetryExecutor` 手写完成(指数退避 + 抖动 + 错误分类)
-- [ ] `LlmException` 重构完成,状态码在类型里
-- [ ] 三条验证路径(500 重试成功 / 401 不重试 / 超时重试)全部实际跑过
-- [ ] git 提交:`git add -A && git commit -m "W4D3: 重试 + 错误分类"`
+- [x] `RetryExecutor` 手写完成(指数退避 + 抖动 + 错误分类)
+- [x] `LlmException` 重构完成,状态码在类型里
+- [x] 三条验证路径(500 重试成功 / 401 不重试 / 超时重试)全部实际跑过
+- [x] git 提交:`git add -A && git commit -m "W4D3: 重试 + 错误分类"`
 
 ---
 
