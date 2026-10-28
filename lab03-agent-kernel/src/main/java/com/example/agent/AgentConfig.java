@@ -92,16 +92,16 @@ public class AgentConfig {
             if (maxTokens == null || maxTokens <= 0) {
                 throw new IllegalArgumentException("maxTokens 必须大于0");
             }
-            if (connectTimeoutMs > 0) {
+            if (connectTimeoutMs < 0) {
                 throw new IllegalArgumentException("connectTimeoutMs 必须大于0");
             }
-            if (requestTimeoutMs > 0) {
+            if (requestTimeoutMs < 0) {
                 throw new IllegalArgumentException("requestTimeoutMs 必须大于0");
             }
-            if (silentTimeoutMs > 0) {
+            if (silentTimeoutMs < 0) {
                 throw new IllegalArgumentException("silentTimeoutMs 必须大于0");
             }
-            if (silentTimeoutMs < requestTimeoutMs) {
+            if (silentTimeoutMs > requestTimeoutMs) {
                 throw new IllegalArgumentException("silentTimeoutMs 不能大于 requestTimeoutMs");
             }
             return new AgentConfig(systemPrompt, temperature, maxTokens, maxRounds,  connectTimeoutMs, requestTimeoutMs, silentTimeoutMs);

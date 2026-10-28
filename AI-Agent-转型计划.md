@@ -2779,12 +2779,134 @@ for (String line : lines) {
 1. **这是近似实现,有盲区**:如果服务端**一个 chunk 都不发**,消费线程会阻塞在 `hasNext()`/`iterator.next()` 上,检查根本没机会执行——此时兜底的是第 3 步的 `requestTimeoutMs`。生产级方案是「看门狗线程 / `CompletableFuture.orTimeout` / 虚拟线程 + 独立计时」,第 12 周升级。**知道近似实现的边界,比假装完美更有价值**。
 2. 近似版能抓住的是「发了几个 chunk 之后突然沉默」——这恰好是产品上最痛的场景(用户已经看到字在蹦,突然卡住),虽不完美但很实用。
 
-**第 5 步:超时 × 重试组合(10 分钟)**
+**第 5 步:超时 × 重试组合(30 分钟)**
 
-1. **超时算可重试错误**(第 1 步已做)。但注意 `chatStream` 现在只把 `send()` 包在 `retryExecutor.execute()` 里,静默超时发生在**消费行流阶段**,在重试圈外面——要把「发送 + 消费」都包进去。
-2. **重试预算收紧**:流式超时让用户等 3 轮超时是灾难。给流式路径单独一个 `RetryExecutor(2, 1000)`(重试 2 次就好),`LlmClient` 里加第二个字段 `streamRetryExecutor`。
+这一步要做的事一句话:**让「静默超时」发生时,昨天写的重试机制能接住它。** 现在接不住,因为重试圈画小了。
 
-> **一个要想清楚的 trade-off(写进笔记,面试可聊)**:流式超时重试整个请求时,`onToken` 可能已经吐出去一部分字了,重试会**重复吐**。三个选择:① 接受重复(CLI demo 可以);② buffer 到成功再吐(失去流式意义);③ 只对「一个 token 都没吐出去就超时」的情况重试。今天选 ① 或 ③ 并写注释说明,这就是工程取舍。
+**先看问题:现在的代码为什么接不住**。`chatStream()` 现在的结构(简化):
+
+```java
+// ① 发送阶段 —— 在重试圈里面 ✅
+HttpResponse<Stream<String>> response = retryExecutor.execute(() -> {
+    ... httpClient.send(request, ofLines()) ...
+});
+
+// ② 消费阶段 —— 在重试圈外面 ❌
+for (String line : lines) {
+    ... 解析 chunk ...
+    // 第 4 步的静默超时检查在这里面,抛 LlmTimeoutException
+}
+```
+
+`retryExecutor.execute()` 只包住了 **① 发请求拿到响应头**,而静默超时是第 4 步加在 **② 消费循环**里的——超时一抛,直接从 `chatStream` 飞出去了,**根本没有第二次机会**。对比 `chat()`:它 `send()` 一直阻塞到收完完整响应才返回,「发送」=「整个调用」,重试圈大小刚好;但流式是**边收边处理**,发送和消费是分开的两段,昨天的圈就画小了。
+
+**事情 1:把重试圈扩大 —— 「发送 + 消费」整体作为一个可重试单元**。把整个「一次完整尝试」(发请求 + 逐行消费到 `[DONE]`)塞进一个 lambda 交给重试器,静默超时一抛 → `isRetryable` 认出 `LlmTimeoutException`(第 1 步干的事)→ 退避 → **整个流程从头发一次**:
+
+```java
+retryExecutor.execute(() -> {
+    // —— 以下整块 = 「一次尝试」,失败了整个重来 ——
+    HttpResponse<Stream<String>> res = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+    if (res.statusCode() != 200) {
+        throwLlmError(res.statusCode(), res.body().collect(Collectors.joining()));
+    }
+    long lastActivity = System.currentTimeMillis();
+    for (String line : (Iterable<String>) res.body()::iterator) {
+        long silentMs = System.currentTimeMillis() - lastActivity;
+        if (silentMs > agentConfig.getSilentTimeoutMs()) {
+            throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
+        }
+        lastActivity = System.currentTimeMillis();
+        // ... 原有的解析 + onToken.accept(token) ...
+    }
+    return null;
+});
+```
+
+**事情 2:流式重试预算收紧 —— 换个更严的重试器**。非流式用的是 `RetryExecutor(3, 1000)`(最多试 3 次),但流式场景用户**盯着屏幕在等**:超时一次等 10s、重试又超时又等 10s……3 轮下来用户等快 1 分钟才看到报错,体验是灾难。所以给流式单独一个更狠的:
+
+```java
+// LlmClient 的字段里(chat() 继续用 retryExecutor,chatStream 用这个)
+private final RetryExecutor streamRetryExecutor = new RetryExecutor(2, 1000);  // 最多试 2 次
+```
+
+含义:**流式超时最多重试 1 次就认输报错,别让用户干等**。
+
+**一个必须想清楚的副作用(trade-off,写进笔记,面试可聊)**:重试圈扩大后,第一次尝试可能**已经吐了一半字**给 `onToken` 了才超时,重试从头发、模型又从头生成——**用户会看到字重复出现**:
+
+```
+你今天天气……(超时,重试)
+北京今天晴,25°C        ← 从头又吐一遍,屏幕上的字重复了
+```
+
+三个处理选择,今天**选一个并写注释**(打卡要求练的是「意识到取舍」,不是完美解决):
+
+| 选择            | 做法                                     | 代价             |
+| ------------- | -------------------------------------- | -------------- |
+| ① 接受重复        | 什么都不做,重试就重复吐                           | demo 可接受,产品不行  |
+| ② 缓冲后一次性吐     | 攒到流成功结束才调 onToken                      | **失去流式意义**,不推荐 |
+| ③ 只重试「零输出」的情况 | 用 `boolean emitted` 标记,已经吐过字就不再重试、直接报错 | 最稳妥,推荐         |
+
+**完整参考代码(选择 ③ 的 `chatStream()` 改造版,先自己写再对照)**:
+
+```java
+// LlmClient 字段:
+// 流式专用重试:最多 2 次(1 次原始 + 1 次重试),首退避 1s
+private final RetryExecutor streamRetryExecutor = new RetryExecutor(2, 1000);
+
+public void chatStream(String systemPrompt, String userMessage, Consumer<String> onToken) {
+    Map<String, Object> body = buildBody(systemPrompt, userMessage, true);
+    streamRetryExecutor.execute(() -> {
+        HttpRequest request = getHttpRequest(body);
+
+        // —— 以下整块 = 「一次尝试」,发送 + 消费都在重试圈里,失败整体重来 ——
+        HttpResponse<Stream<String>> res = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+        if (res.statusCode() != 200) {
+            // 出错时响应体不是 SSE,是普通 JSON,先把行拼回来看
+            throwLlmError(res.statusCode(), res.body().collect(Collectors.joining()));
+        }
+
+        boolean emitted = false;   // 选择③:是否已经吐过字
+        long lastActivity = System.currentTimeMillis();
+        boolean done = false;
+        String prefix = "data: ";
+        Iterable<String> lines = () -> res.body().iterator();
+
+        for (String line : lines) {
+            // 静默超时检查:距上一行太久没动静就断
+            long silentMs = System.currentTimeMillis() - lastActivity;
+            if (silentMs > agentConfig.getSilentTimeoutMs()) {
+                if (emitted) {
+                    // 已经吐过字,重试会重复输出 → 抛普通 RuntimeException
+                    // (isRetryable 默认返回 false → 不重试,直接报错,这是有意为之)
+                    throw new RuntimeException("流式静默超时: " + silentMs
+                            + "ms 没收到 chunk(已输出部分文本,为避免重复输出不重试)");
+                }
+                // 一个字都没吐过 → 可以安全地整体重试
+                throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
+            }
+            lastActivity = System.currentTimeMillis();   // 收到行 = 有进展,盖章
+
+            if (done || !line.startsWith(prefix)) {
+                continue;
+            }
+            String payload = line.substring(prefix.length()).trim();
+            if (payload.equals("[DONE]")) {
+                done = true;
+                continue;
+            }
+            String token = extractChoiceContent(mapper.readTree(payload), "delta");
+            if (token == null || token.trim().isBlank()) {
+                continue;   // 首尾 chunk / 思考过程跳过
+            }
+            emitted = true;
+            onToken.accept(token.trim());
+        }
+        return null;
+    });
+}
+```
+
+> 代码里藏着一个错误分类的细节,注意体会:同样是「静默超时」,`emitted=false` 时抛 `LlmTimeoutException`(可重试)、`emitted=true` 时抛普通 `RuntimeException`(不可重试)——**用异常的类型承载「该不该重试」的决策**,和 W4D3 的 `LlmException` 一脉相承,这就是「从字符串地狱到类型系统」。
 
 #### 4.6 FakeLlmServer 剧本 + 测试(25 分钟)
 
@@ -2825,8 +2947,8 @@ if (reqBody.contains("TRIGGER_SLOW_STREAM")) {
 **Day 4 打卡项**:
 
 - [ ] 流式静默超时实现(近似版),FakeLlmServer 剧本验证过
-- [ ] AgentConfig 三个超时字段,预算各不相同
-- [ ] 超时错误接入 RetryExecutor,重试预算收紧
+- [x] AgentConfig 三个超时字段,预算各不相同
+- [x] 超时错误接入 RetryExecutor,重试预算收紧
 - [ ] 近似实现的局限写进 README(诚实记录)
 - [ ] git 提交:`git add -A && git commit -m "W4D4: 超时体系"`
 

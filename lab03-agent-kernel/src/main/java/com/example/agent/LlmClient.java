@@ -41,24 +41,30 @@ public class LlmClient {
 
     private final RetryExecutor retryExecutor;
 
+    private final RetryExecutor streamRetryExecutor;
+
     public LlmClient(String baseUrl, String model, String apiKey,  AgentConfig agentConfig) {
         // 默认:最多 3 次,首退避 1 秒(实际 1s→2s→4s,加抖动)
         this(baseUrl, model, apiKey, agentConfig, new RetryExecutor(3, 1000));
     }
 
     public LlmClient(String baseUrl, String model, String apiKey,  AgentConfig agentConfig, RetryExecutor retryExecutor) {
+        this(baseUrl, model, apiKey, agentConfig, retryExecutor, new RetryExecutor(2, 1000));
+    }
+
+    public LlmClient(String baseUrl, String model, String apiKey, AgentConfig agentConfig, RetryExecutor retryExecutor, RetryExecutor streamRetryExecutor) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("baseUrl 不能为空");
         }
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("apiKey 不能为空");
         }
-
         this.baseUrl = baseUrl;
         this.model = model;
         this.apiKey = apiKey;
         this.agentConfig = agentConfig;
         this.retryExecutor = retryExecutor;
+        this.streamRetryExecutor = streamRetryExecutor;
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(agentConfig.getConnectTimeoutMs()))
                 .build();
@@ -75,43 +81,48 @@ public class LlmClient {
 
     public void chatStream(String systemPrompt, String userMessage, Consumer<String> onToken){
         Map<String, Object> body = buildBody(systemPrompt, userMessage, true);
-
         try {
             HttpRequest request = getHttpRequest(body);
-
-            HttpResponse<Stream<String>> response = retryExecutor.execute(() -> {
+            streamRetryExecutor.execute(() -> {
                 HttpResponse<Stream<String>> res = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
                 if (res.statusCode() != 200) {
                     // 注意!出错时响应体不是 SSE,是普通 JSON 错误,得先把行拼回来看
                     throwLlmError(res.statusCode(), res.body().collect(Collectors.joining()));
                 }
+                long lastActivity = System.currentTimeMillis();
+                boolean emitted = false; // 是否已经吐过字
+                boolean done = false;
+                String prefix = "data: ";
+                for (String line : (Iterable<String>) res.body()::iterator) {
+                    long silentMs = System.currentTimeMillis() - lastActivity;
+                    if (silentMs > agentConfig.getSilentTimeoutMs()) {
+                        if (emitted) {
+                            // 已经吐过字,重试会重复输出 → 抛普通 RuntimeException
+                            // (isRetryable 默认返回 false → 不重试,直接报错,这是有意为之)
+                            throw new RuntimeException("流式静默超时: " + silentMs
+                                    + "ms 没收到 chunk(已输出部分文本,为避免重复输出不重试)");
+                        }
+                        // 一个字都没吐过 → 可以安全地整体重试
+                        throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
+                    }
+                    lastActivity = System.currentTimeMillis();   // 收到行 = 有进展
+                    if (done || !line.startsWith(prefix)) {
+                        continue;
+                    }
+                    String payload = line.substring(prefix.length()).trim();
+                    if (payload.equals("[DONE]")) {
+                        done = true;
+                        continue;
+                    }
+                    String token = extractChoiceContent(mapper.readTree(payload), "delta");
+                    if (token == null || token.trim().isBlank()) {
+                        continue; // 首尾 chunk / 思考过程在这里被跳过
+                    }
+                    emitted = true;
+                    onToken.accept(token.trim());
+                }
                 return res;
             });
-            boolean done = false;
-            String prefix = "data: ";
-            Iterable<String> lines = () -> response.body().iterator();
-            long lastActivity = System.currentTimeMillis();
-            for (String line : lines) {
-                long silentMs = System.currentTimeMillis() - lastActivity;
-                if (silentMs > agentConfig.getSilentTimeoutMs()) {
-                    // 异常里带上现场信息,排查省一半时间
-                    throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
-                }
-                lastActivity = System.currentTimeMillis();   // 收到行 = 有进展
-                if (done || !line.startsWith(prefix)) {
-                    continue;
-                }
-                String payload = line.substring(prefix.length()).trim();
-                if (payload.equals("[DONE]")) {
-                    done = true;
-                    continue;
-                }
-                String token = extractChoiceContent(mapper.readTree(payload), "delta");
-                if (token == null || token.trim().isBlank()) {
-                    continue; // 首尾 chunk / 思考过程在这里被跳过
-                }
-                onToken.accept(token.trim());
-            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -235,7 +246,6 @@ public class LlmClient {
 
     private HttpRequest getHttpRequest(Map<String, Object> body) throws JsonProcessingException {
         String jsonBody = mapper.writeValueAsString(body);
-
         return HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/chat/completions"))
                 .timeout(Duration.ofMillis(agentConfig.getRequestTimeoutMs())) // LLM 生成耗时长,10 秒不够用
