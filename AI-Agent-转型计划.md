@@ -2992,7 +2992,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 
 - [x] README 补 lab03 最终形态
 - [x] 三周进度日志补全(这就是你转行叙事的原始素材)
-- [ ] git 提交:`git add -A && git commit -m "W4D5: Python 对照 + 第一阶段验收"`
+- [x] git 提交:`git add -A && git commit -m "W4D5: Python 对照 + 第一阶段验收"`
 
 ---
 
