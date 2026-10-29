@@ -65,14 +65,12 @@ public class FakeLlmServer {
 
             // 场景 e:首个 chunk 迟到(TRIGGER_LATE_FIRST_CHUNK)—— 触发「零输出」分支
             if (reqBody.contains("TRIGGER_LATE_FIRST_CHUNK")) {
-                try {
-                    Thread.sleep(SILENCE_MS);          // 先沉默,一个字都没发
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
                 try (OutputStream os = startSse(exchange)) {
+                    Thread.sleep(SILENCE_MS);          // 先沉默,一个字都没发
                     writeSse(os, "你");
                     writeSseEnd(os);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
                 }
                 return;
             }
