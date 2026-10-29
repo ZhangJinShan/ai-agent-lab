@@ -2946,11 +2946,11 @@ if (reqBody.contains("TRIGGER_SLOW_STREAM")) {
 
 **Day 4 打卡项**:
 
-- [ ] 流式静默超时实现(近似版),FakeLlmServer 剧本验证过
+- [x] 流式静默超时实现(近似版),FakeLlmServer 剧本验证过
 - [x] AgentConfig 三个超时字段,预算各不相同
 - [x] 超时错误接入 RetryExecutor,重试预算收紧
-- [ ] 近似实现的局限写进 README(诚实记录)
-- [ ] git 提交:`git add -A && git commit -m "W4D4: 超时体系"`
+- [x] 近似实现的局限写进 README(诚实记录)
+- [x] git 提交:`git add -A && git commit -m "W4D4: 超时体系"`
 
 ---
 
