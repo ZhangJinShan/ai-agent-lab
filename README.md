@@ -135,7 +135,8 @@ eval 等于把「任意代码执行」的钥匙交给用户:模型输出受 prom
 - ConversationMemory:滑动窗口裁剪,system 保留,tool 组整组裁剪
 - Agent.chat():对外唯一入口,内聚记忆/工具/循环
 - PromptTemplate:{date}/{userName} 占位符渲染
-- 单测:ConversationMemoryTest(3 个)+ PromptTemplateTest(5 个),覆盖裁剪不变量和渲染三策略
+- 超时体系(W4D4):connect/request/silent 三级超时 + 流式静默超时 + 超时×重试(详解见下)
+- 单测:ConversationMemoryTest(3 个)+ PromptTemplateTest(5 个)+ LlmClientTimeoutTest(4 个),覆盖裁剪不变量、渲染三策略和超时行为
 
 ## 架构图(相比 lab02 多了 memory/config 两个方块)
 
@@ -194,3 +195,64 @@ memory 贯穿所有 chat() 调用:第 2 问能看到第 1 问的对话;newConver
 | 无 | ConversationMemory 滑动窗口(system 永留、tool 组整组裁) | 上下文有限;tool 组裁一半会出孤儿 tool |
 | 无 | PromptTemplate 占位符渲染(缺失 key 抛异常) | 提示词模板化,变量缺失早失败 |
 | 无 | AgentConfig builder + 校验 | 参数可配置第一步 |
+
+## 超时体系(W4D4)
+
+**今天把「等」变成可控的。** 没有超时的 HTTP 调用 = 线程被无限挂起 = 线程池打满 = 全站雪崩。
+
+### 三种超时,各管一段
+
+| 超时 | 控制什么 | 预算 | 不设的后果 |
+| --- | --- | --- | --- |
+| connectTimeoutMs | TCP 握手等多久 | 5s(连不上就是网络有问题) | 傻等不存在的主机 |
+| requestTimeoutMs | 整个请求(含生成)等多久 | 60s(生成慢,给足) | 线程被无限挂起 |
+| silentTimeoutMs | 流式两个 chunk 之间隔多久没动静就断 | 15s(慢思考模型 15~30s) | 60s 里模型可以 59 秒不吐字,用户盯空白屏 |
+
+流式为什么需要第三种:总超时管「总时长」,静默超时管「持续有进展」——用户已经看到字在蹦,突然卡住才是产品上最痛的场景。
+
+配置进 AgentConfig,`build()` 做一致性校验:`silentTimeoutMs > requestTimeoutMs` 直接拒绝(静默预算不该比总预算还大,否则这个字段没意义)。
+
+### 流式静默超时的实现(近似版,诚实记录局限)
+
+思路:给每次「收到行」盖时间戳,消费循环里检查「距上一行是否超时」,超了抛 `LlmTimeoutException`。
+
+**两个必须知道的边界(不装完美)**:
+
+1. **这是近似实现,有盲区**:如果服务端**一个 chunk 都不发**(或响应头都不发),消费线程阻塞在 `next()` 上,检查根本没机会执行——此时兜底的是 `requestTimeoutMs`。生产级方案是「看门狗线程 / `CompletableFuture.orTimeout` / 虚拟线程 + 独立计时」,第 12 周可靠性工程里升级。
+2. 近似版能抓住的是「发了几个 chunk 之后突然沉默」——恰好是产品上最痛的场景,虽不完美但很实用。
+
+> 单测里踩过一次才真正理解盲区 ①:FakeLlmServer 的「首字迟到」剧本一开始把 sleep 放在 `startSse()` **之前**,模拟出来的其实是「响应头迟到」——那是 `requestTimeoutMs` 的辖区,静默检查看不见(`lastActivity` 都还没起表),首字跟着响应头秒到、字直接吐了出去。sleep 挪到发响应头**之后**才是「首字迟到」。
+
+### 超时 × 重试:用异常类型承载「该不该重试」
+
+重试圈要画对:流式是「发送 + 消费」两段,**整块**塞进一个可重试单元,超时了整体从头发。然后按「吐没吐过字」分流——同一个静默超时,抛两种异常:
+
+| 场景 | 抛什么 | 重试? | 为什么 |
+| --- | --- | --- | --- |
+| 已吐字后沉默 | 普通 RuntimeException | 不重试(`isRetryable` 默认 false,有意为之) | 重试从头生成,用户会看到字重复出现 |
+| 首字迟到,零输出 | LlmTimeoutException | 重试(接入 `isRetryable` 的类型表) | 一个字都没吐,整体重来是安全的 |
+
+配套两个决策(都写进注释了):
+
+- **流式重试预算收紧**:单独一个 `RetryExecutor(2, ...)`——最多重试 1 次就认输报错,别让用户干等 3 轮超时(非流式仍是 3 次)
+- **重复吐字的取舍**:①接受重复(demo 可以,产品不行)/ ②缓冲后一次性吐(失去流式意义)/ **③只重试零输出的情况**(选了这个,`boolean emitted` 标记)——打卡练的是「意识到取舍」
+
+`LlmTimeoutException` 进 `isRetryable` 靠的是 `instanceof`,不是 `message.contains(...)`——加一种错误分类只要加一个类型判断,这是 W4D3「从字符串地狱到类型系统」的延续。
+
+### 测试(LlmClientTimeoutTest 4 个,mvn test 全绿)
+
+FakeLlmServer 补了三个流式剧本:`TRIGGER_SLOW_STREAM`(先吐字再沉默)/ `TRIGGER_LATE_FIRST_CHUNK`(首字迟到零输出)/ `TRIGGER_STREAM`(正常速度,验证不误杀)。
+
+| 用例 | 验证的行为 | 关键断言 |
+| --- | --- | --- |
+| 已吐字后沉默 | 报错且不重试 | requestCount=1;首字已吐给调用方;耗时远小于总超时 |
+| 首字迟到没吐过字 | 安全重试到耗尽 | requestCount=2(1 原始 + 1 重试);超时前一个字都没吐 |
+| 正常速度的流 | 不误杀 | "你好" 拼接完整 |
+| 静默预算大于总预算 | 拒绝构建配置 | IllegalArgumentException,纯逻辑秒跑 |
+
+### 踩坑记录
+
+1. **`isRetryable` 对 RuntimeException 默认返回 false**——`LlmTimeoutException` 继承 RuntimeException,不显式加进类型表就永远不会被重试,静默超时直接飞出去
+2. **HttpClient 字段初始化拿不到 config**——字段初始化发生在构造函数之前,`agentConfig` 还没赋值;要把 HttpClient 挪进构造函数
+3. **FakeLlmServer 流式忘了 `os.flush()`**——数据攒在缓冲区,客户端一直等不到第一个 chunk,「流式」变「一次性」
+4. **「响应头迟到」≠「首字迟到」**——sleep 放在 `startSse()` 之前/之后是两个完全不同的剧本,前者归 `requestTimeoutMs` 管,后者才是静默超时的菜(详见上面盲区 ①)
