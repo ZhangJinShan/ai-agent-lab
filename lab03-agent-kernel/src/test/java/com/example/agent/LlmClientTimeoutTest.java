@@ -52,10 +52,17 @@ public class LlmClientTimeoutTest {
 
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
 
+        System.out.println(ex.getMessage());
+
         assertTrue(ex.getMessage().contains("静默超时"), "异常要说人话");
-        // TODO: 断言「不重试」—— 用哪个数字?fake.requestCount() 应该是几?
-        // TODO: 断言第一个字已经吐出去了 —— got.get() 应该是什么?
-        // TODO: 断言「没干等」—— elapsedMs 应该小于多少?(想想整个剧本走完要多久)
+        // T// 已吐字 → 抛普通 RuntimeException → 不可重试 → 只发了 1 次请求
+        assertEquals(1, fake.requestCount(), "已兔子后超时，不重试");
+        // 第一个 chunk 在超时检查之前就吐出去了,第二个「好」永远不会到达 onToken
+        assertEquals("你", got.get(), "第一个字已经吐给调用方了");
+        // 超时检查在「收到第 2 行时」触发(近似实现的盲区,README 有写):
+        // 一轮剧本约 SILENCE_MS(800ms)就该断;若重试会 ≥2×800ms,若干等是 60s 总超时
+        assertTrue(elapsedMs < FakeLlmServer.SILENCE_MS * 2,
+                "没干等也没重试,实际耗时 " + elapsedMs + "ms");
     }
 
     @Test
@@ -65,7 +72,8 @@ public class LlmClientTimeoutTest {
                         token -> fail("超时前不该吐出任何字")));
 
         assertTrue(ex.getMessage().contains("静默超时"));
-        // TODO: 断言「重试了」—— fake.requestCount() 应该是几?(流式重试器最多 2 次)
+        // 零输出 → LlmTimeoutException 可重试 → 流式重试器最多 2 次,耗尽后抛出
+        assertEquals(2, fake.requestCount(), "1 次原始尝试 + 1 次重试,共 2 个请求");
     }
 
     @Test
@@ -76,9 +84,15 @@ public class LlmClientTimeoutTest {
     }
 
     @Test
-    void 测试4_静默预算大于总预算_拒绝构建配置() {
-        // 纯逻辑,不起服务器,秒跑
-        // TODO: assertThrows IllegalArgumentException,
-        //       silentTimeoutMs(70_000L) + requestTimeoutMs(60_000L) 构建 AgentConfig
+    void 测试4_静默预算大于总预算_拒绝构建配置(){
+            // 纯逻辑,不起服务器,秒跑
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> AgentConfig.builder()
+                            .systemPrompt("你是测试助手")   // 必须设!不然先撞 systemPrompt 校验,测偏了
+                            .silentTimeoutMs(70_000L)
+                            .requestTimeoutMs(60_000L)
+                            .build());
+            assertTrue(ex.getMessage().contains("silentTimeoutMs"),
+                    "报错要指明是哪个字段的问题");
     }
 }
