@@ -2968,21 +2968,21 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 
 跑 LangGraph 官方 quickstart(工具调用版),然后对照(写进笔记,面试素材):
 
-| 你 4 周手写的                 | 框架里对应什么                   | 你现在的理解             |
-| ------------------------ | ------------------------- | ------------------ |
-| chatCompletions + SSE 解析 | `ChatModel` 封装            | 协议层:全是一个 HTTP POST |
-| Tool + ToolRegistry      | `@tool` 装饰器 / ToolNode    | 声明 + 分发            |
-| run() 循环                 | 图节点循环 / agent executor    | 「模型要工具→执行→喂回」      |
-| ConversationMemory       | Checkpointer / ChatMemory | 滑动窗口 vs 摘要 vs 向量记忆 |
-| RetryExecutor / 超时       | 框架内置 resilience           | 原理就是指数退避           |
-| traceId 日志               | LangSmith / Langfuse 追踪   | MDC → 分布式 trace    |
+| 你 4 周手写的                 | 框架里对应什么                   | 你现在的理解                                   |
+| ------------------------ | ------------------------- | ---------------------------------------- |
+| chatCompletions + SSE 解析 | `ChatModel` 封装            | 本质就是 HTTP POST 的调用                       |
+| Tool + ToolRegistry      | `@tool` 装饰器 / ToolNode    | 注册、调用                                    |
+| run() 循环                 | 图节点循环 / agent executor    | 根据用户请求判断是否调用工具 →调用工具 → 工具执行结果喂回模型 → 模型梳理最后的输出 |
+| ConversationMemory       | Checkpointer / ChatMemory | 滑动窗口 vs 摘要 vs 向量记忆                       |
+| RetryExecutor / 超时       | 框架内置 resilience           | 原理就是指数退避                                 |
+| traceId 日志               | LangSmith / Langfuse 追踪   | MDC → 分布式 trace                          |
 
 #### 5.2 第一阶段交付物验收(40 分钟)
 
 ### 📦 第一阶段交付物(打勾才进第二阶段)
 
 - [x] 仓库 lab01~lab03 代码可运行,README 完整
-- [ ] **合上文档,能在 2 小时内手写出 tool use 循环**(做不到就重写一遍第 2 周代码)
+- [x] **合上文档,能在 2 小时内手写出 tool use 循环**(做不到就重写一遍第 2 周代码)
 - [x] 一张自己画的「Agent 消息流转图」,能给同事讲明白
 - [x] (补充)lab03 的 memory 裁剪和 config 设计,能说清每处取舍的理由
 
@@ -2990,8 +2990,8 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 
 #### 5.3 收尾
 
-- [ ] README 补 lab03 最终形态
-- [ ] 三周进度日志补全(这就是你转行叙事的原始素材)
+- [x] README 补 lab03 最终形态
+- [x] 三周进度日志补全(这就是你转行叙事的原始素材)
 - [ ] git 提交:`git add -A && git commit -m "W4D5: Python 对照 + 第一阶段验收"`
 
 ---
@@ -3212,7 +3212,10 @@ get_ticket_detail(ticketId)                → 工单详情
 ```
 | 周 | 完成情况 | 卡点 | 一句话心得 |
 |----|---------|------|-----------|
-| W1 |         |      |           |
-| W2 |         |      |           |
+| W1 | lab01:裸调 API,chat/chatStream/extractJson + FakeLlmServer 3 单测 | 久疏手写对着文档敲不出来;SSE 首尾 chunk 判空、截断误判为格式错 | LLM 接口就是普通 HTTP POST,先 curl 再写码 |
+| W2 | lab02:tool use 核心循环 + 手写递归下降计算器 + 对抗测试 + 消息流转图 | function.arguments 是字符串不是对象;tools 拼接无从下手 | Agent = while 循环 + 一份变长的消息列表 |
+| W3 | lab03:AgentConfig / 滑动窗口记忆 / 多轮 REPL + temperature 实验 | tool 消息键名写成 tool_id;system 消息每轮重复堆积 | 上下文工程第一课:记忆不是越多越好 |
+| W4 | 工程化:traceId 日志、Token 算钱、指数退避重试、三级超时体系,22 单测全绿 | isRetryable 默认不认 RuntimeException;mvn test 假绿(surefire 太老,Tests run: 0) | 生产护甲全是后端基本功的平移 |
+| W5 |         |      |           |
 ...（每周日填写,16 周后这就是你的转行叙事素材）
 ```

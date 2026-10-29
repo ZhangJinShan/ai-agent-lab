@@ -4,3 +4,5 @@
 /lab02-tool-loop/.mvn/
 /lab02-tool-loop/target/
 /lab03-agent-kernel/target
+/lab03-py/.idea
+/lab03-py/.venv

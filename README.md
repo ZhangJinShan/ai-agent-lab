@@ -1,3 +1,25 @@
+# ai-agent-lab — Java 后端转型 AI Agent 的 16 周实验仓库
+
+不依赖任何 AI 框架,从零手写 LLM 客户端 / tool use 循环 / 最小 Agent 内核,
+再对照主流框架理解「框架替你省了什么」。学习原则:核心代码全部手敲,不复制粘贴。
+
+## 模块导航
+
+| 模块 | 内容 | 核心产出 |
+|---|---|---|
+| lab01-llm-client | 裸调 LLM API | chat / SSE 流式 / JSON 提取 + FakeLlmServer 单测 |
+| lab02-tool-loop | 手写 tool use 循环 | Agent.run() 循环 + 安全 calculate + 对抗测试 |
+| lab03-agent-kernel | 最小 Agent 内核 | 记忆/配置/日志/算钱/重试/超时,生产级护甲 |
+| lab03-py | Python 框架对照 | LangGraph 快跑,手写 vs 框架对照表 |
+
+## 快速开始
+
+- 环境:JDK 17+(命令行注意 `export JAVA_HOME=<jdk17>`)/ Python 3.12 / 环境变量 `LLM_API_KEY`
+- Java 单测:`cd lab0X && mvn test` —— 打的是 FakeLlmServer,离线可跑不耗 API(lab01 3 个 / lab03 22 个;lab02 无单测,验收靠对抗测试)
+- Python 对照:`cd lab03-py && source .venv/bin/activate && python main.py`(真实调 API,消耗很小)
+
+---
+
 # lab01-llm-client — 裸调 LLM API 练手
 
 一个不依赖任何 AI 框架的 Java LLM 客户端:同步调用 / SSE 流式 / JSON 结构化提取。
@@ -135,18 +157,24 @@ eval 等于把「任意代码执行」的钥匙交给用户:模型输出受 prom
 - ConversationMemory:滑动窗口裁剪,system 保留,tool 组整组裁剪
 - Agent.chat():对外唯一入口,内聚记忆/工具/循环
 - PromptTemplate:{date}/{userName} 占位符渲染
+- 结构化日志(W4D1):JSON 格式 logback + traceId 贯穿一次对话(MDC,finally 里 remove 防泄漏)
+- Token 统计 + 算钱(W4D2):TokenUsage 累计器,工具循环多轮调用不漏记,会话结束打印次数/tokens/花费
+- 重试(W4D3):RetryExecutor 手写指数退避 + 抖动,LlmException 状态码进类型,错误分类「重试能改变结果的才重试」
 - 超时体系(W4D4):connect/request/silent 三级超时 + 流式静默超时 + 超时×重试(详解见下)
-- 单测:ConversationMemoryTest(3 个)+ PromptTemplateTest(5 个)+ LlmClientTimeoutTest(4 个),覆盖裁剪不变量、渲染三策略和超时行为
+- 单测 22 个:ConversationMemoryTest(3)+ PromptTemplateTest(5)+ RetryExecutorTest + LlmClientRetryTest(3)+ LlmClientTimeoutTest(4),覆盖裁剪不变量、渲染策略、重试分类和超时行为
 
 ## 架构图(相比 lab02 多了 memory/config 两个方块)
 
 ```
     KernelMain
         │
-        ├── AgentConfig(builder:systemPrompt / temperature / maxTokens / maxRounds)
+        ├── AgentConfig(builder:systemPrompt / temperature / maxTokens / maxRounds
+        │                + connect/request/silent 三个超时预算)
         ├── ToolRegistry(get_weather / calculate)
         ├── ConversationMemory(maxMessages 滑动窗口)
-        └── LlmClient(同一份 config → temperature/max_tokens 进请求体)
+        ├── TokenUsage(token 账本,每次响应记 usage,会话结束算钱)
+        └── LlmClient(同一份 config → temperature/max_tokens 进请求体;
+                      外挂 RetryExecutor:指数退避重试,流式单独收紧预算)
                 │
                 ▼
     Agent.chat(userInput)  ←── 对外唯一入口
@@ -161,6 +189,7 @@ eval 等于把「任意代码执行」的钥匙交给用户:模型输出受 prom
 ```
 
 memory 贯穿所有 chat() 调用:第 2 问能看到第 1 问的对话;newConversation() 清空后下次 chat 自动补回 system。
+每次 chat() 生成 traceId 放进 MDC,本次对话的全部日志(开始/轮次/工具/结束)自动带上它;对话结束 finally 里 remove,防止泄漏到下一次对话。
 
 ## temperature 实验结论(贴 5.1 的表)
 
@@ -256,3 +285,38 @@ FakeLlmServer 补了三个流式剧本:`TRIGGER_SLOW_STREAM`(先吐字再沉默)
 2. **HttpClient 字段初始化拿不到 config**——字段初始化发生在构造函数之前,`agentConfig` 还没赋值;要把 HttpClient 挪进构造函数
 3. **FakeLlmServer 流式忘了 `os.flush()`**——数据攒在缓冲区,客户端一直等不到第一个 chunk,「流式」变「一次性」
 4. **「响应头迟到」≠「首字迟到」**——sleep 放在 `startSse()` 之前/之后是两个完全不同的剧本,前者归 `requestTimeoutMs` 管,后者才是静默超时的菜(详见上面盲区 ①)
+
+---
+
+# lab03-py — Python 框架对照(W4D5)
+
+用 LangGraph 跑同一个「查天气」demo,对照 4 周手写代码,理解框架替你省掉了什么。
+运行:`source .venv/bin/activate && python main.py`(真实调 API,一次对话消耗很小)。
+
+## 手写 vs 框架对照表
+
+| 你手写的 | 框架里对应什么 | 你现在的理解 |
+| --- | --- | --- |
+| chatCompletions + SSE 解析 | ChatModel 封装 | 协议没变——底下还是那个 HTTP POST + SSE;判空跳过首尾 chunk、错误分类这些苦力被框架收走了,但能看原始报文排查问题的手感,只有手写过才有 |
+| Tool + ToolRegistry + toToolsJson | 普通函数 + docstring,框架从签名自动生成 schema | schema 自动生成省掉了 toToolsJson;但 docstring 就是给模型的说明书——description 决定工具选择准确率,这笔账在哪都得写好 |
+| Agent.run() 循环 | create_react_agent 内部图循环 | 就是我那个 while + 变长的 messages;tool_call_id 配对、assistant 原样回传这些我踩过的协议红线,框架内置兜住了 |
+| ConversationMemory 整组裁剪 | Checkpointer / ChatMemory | 框架给的是持久化/摘要那套;滑动窗口「拆散 tool 组会 400」的坑在框架里同样存在,只是被藏起来了——知道坑在哪才敢用 |
+| RetryExecutor / 超时体系 | 框架内置 resilience | 原理就是指数退避 + 默认 max_retries=2;但「重试能改变结果的才重试」是业务语义判断,框架给不了,还得自己配错误分类 |
+| traceId 日志 | LangSmith / Langfuse 追踪 | MDC 里那行 traceId 就是分布式追踪的雏形,LangSmith 是它的工业版——概念一脉相承 |
+
+> 第三列是初稿,**改成自己的语气再留着**——这是面试要用的表达,说自己的话才不卡壳。
+
+## 关键观察
+
+- `pretty_print` 出的 messages 里同样是「assistant(tool_calls) → tool(tool_call_id)」——**消息流转和 lab02 手写的一模一样**,协议是统一的,框架只是封装
+- 代码量对比(含单测的真实行数):lab02 手写内核 **769 行** vs Python 框架版 **51 行**;整个 lab01~03 Java 共约 **3273 行**。差在哪:HTTP 协议解析、循环、schema 生成、消息流转被框架收走;没差在哪:工具的业务逻辑、「模型输出 = 用户输入」的防御思路——**行数省掉的是苦力,省不掉的是判断力**
+- 一句话总结(面试用):「我用 4 周手写过 Agent 内核,所以看 Spring AI / LangGraph 时,我知道每个抽象在解决我当年踩过的哪个坑。」
+
+---
+
+# 第一阶段自检(2026-10-29)
+
+- [x] lab01~lab03 代码可运行,单测全绿(lab01 3 个 / lab03 22 个;lab02 无单测,验收靠对抗测试)
+- [ ] 合上文档,2 小时内手写出 tool use 循环(写完和 lab02 对 diff,想不起来的部分删掉重写)
+- [ ] 消息流转图能给同事讲明白(加码:找个人 15 分钟讲「Agent = while 循环 + 变长消息列表」+ 流转图)
+- [ ] lab03 的 memory 整组裁剪 / config 校验 / 超时三预算,每处取舍理由能口述
