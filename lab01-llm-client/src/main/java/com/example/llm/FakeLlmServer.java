@@ -1,13 +1,22 @@
 package com.example.llm;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import lombok.Data;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 public class FakeLlmServer {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static final String SSE_SEP = "\n\n";
+
+    private static final String SSE_PREFIX = "data: ";
 
     private final HttpServer server;
 
@@ -41,22 +50,21 @@ public class FakeLlmServer {
                 exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
                 exchange.sendResponseHeaders(200, 0);
                 try (OutputStream os = exchange.getResponseBody()) {
-                    os.write("data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}".getBytes(StandardCharsets.UTF_8));
-                    os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    os.write("data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}".getBytes(StandardCharsets.UTF_8));
-                    os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    os.write("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}".getBytes(StandardCharsets.UTF_8));
-                    os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-                    os.flush();
-                    os.write("data: [DONE]".getBytes(StandardCharsets.UTF_8));
-                    os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-                    os.flush();
+                    SseItem sseItem = new SseItem();
+                    sseItem.choices = List.of(new Choice(new Delta("你")));
+                    sendSse(os, sseItem);
+
+                    sseItem = new SseItem();
+                    sseItem.choices = List.of(new Choice(new Delta("好")));
+                    sendSse(os, sseItem);
+
+                    sseItem = new SseItem();
+                    sseItem.choices = List.of(new Choice(new Delta(null), "stop"));
+                    sendSse(os, sseItem);
+
+                    sendSseDone(os);
                 }
-                //   提示:Content-Type: text/event-stream,sendResponseHeaders(200, 0) 表示 chunked(不声明长度)
-                //   逐行写 "data: {...}\n\n",最后写 "data: [DONE]\n\n"
-                return; // 占位:写完场景 c 后删掉这行
+                return;
             }
 
             // ===== 场景 a(正常响应):标准 chat.completion JSON =====
@@ -88,6 +96,38 @@ public class FakeLlmServer {
         });
     }
 
+    /**
+     * 发送一条sse消息，自动加前缀和分隔符
+     * @param os
+     * @param data
+     * @throws Exception
+     */
+    private void sendSse(OutputStream os, Object data){
+        try {
+            String json = MAPPER.writeValueAsString(data);
+            String line = String.join("", SSE_PREFIX, json, SSE_SEP);
+            os.write(line.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * 发送 [DONE] 结束标记
+     * @param os
+     * @throws Exception
+     */
+    private void sendSseDone(OutputStream os){
+        try {
+            String line = String.join("", SSE_PREFIX, "[DONE]", SSE_SEP);
+            os.write(line.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public void start(){
         server.start();
         port = server.getAddress().getPort();
@@ -96,4 +136,31 @@ public class FakeLlmServer {
     public void stop(){
         server.stop(0);
     }
+
+
+    @Data
+    static class SseItem {
+        private List<Choice> choices;
+    }
+
+    @Data
+    static class Choice {
+        private Delta delta;
+        private String finish_reason;
+        public Choice(Delta delta) {
+            this.delta = delta;
+        }
+        public Choice(Delta delta, String finishReason) {
+            this.delta = delta;
+            this.finish_reason = finishReason;
+        }
+    }
+    @Data
+    static class Delta {
+        private String content;
+        public Delta(String content){
+            this.content = content;
+        }
+    }
+
 }

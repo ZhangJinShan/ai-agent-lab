@@ -41,6 +41,11 @@ public class LlmClient {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("baseUrl 不能为空");
         }
+
+        if (null == model || model.isBlank()) {
+            throw new IllegalArgumentException("model 不能为空");
+        }
+
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("apiKey 不能为空");
         }
@@ -76,9 +81,11 @@ public class LlmClient {
             }
             boolean done = false;
             String prefix = "data: ";
-            Iterable<String> lines = () -> response.body().iterator();
-            for (String line : lines) {
-                if (done || !line.startsWith(prefix)) {
+            for (String line : (Iterable<? extends String>) response.body() :: iterator) {
+                if (done) {
+                    break;
+                }
+                if (!line.startsWith(prefix)) {
                     continue;
                 }
                 String payload = line.substring(prefix.length()).trim();
@@ -144,7 +151,7 @@ public class LlmClient {
             throw new RuntimeException("输出被 max_tokens 截断,JSON 不完整,请调大 max_tokens 或缩短输入");
         }
         String content = extractChoiceContent(root, "message");
-        if (content == null || content.isEmpty()) {
+        if (null == content || content.isEmpty()) {
             throw new RuntimeException("响应里没有 content,原始响应: " + response.body());
         }
         return content;
@@ -170,6 +177,7 @@ public class LlmClient {
 
     /** 从 choices[0].<container>.content 取文本;取不到返回 null。非流式 container 是 message,流式是 delta */
     private String extractChoiceContent(JsonNode root, String container) {
+        // 用 path() 不用 get() 是为了防止字段缺失返回空节点，path() 不会 NPE，LLM的响应永远要当 [不可信输入] 对待
         JsonNode contentNode = root.path("choices").path(0).path(container).path("content");
         if (contentNode.isMissingNode() || contentNode.isNull()) {
             return null;

@@ -57,8 +57,7 @@ public class LlmClientTest {
     void 测试3_流式拼接且跳过无content的chunk() {
         // 调 chatStream() 时用户消息里带 "TRIGGER_STREAM",走场景 c
         StringBuilder sb = new StringBuilder();
-        llmClient.chatStream("你是测试助手", "TRIGGER_STREAM", sb :: append);
-        System.out.println(sb);
+        llmClient.chatStream("你是测试助手", "TRIGGER_STREAM", sb::append);
         assertEquals("你好", sb.toString());
 
         // TODO(你自己写): 用 StringBuilder::append 当 onToken,拼接结果应 == "你好"
