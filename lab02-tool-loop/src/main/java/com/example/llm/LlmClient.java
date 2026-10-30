@@ -76,9 +76,11 @@ public class LlmClient {
             }
             boolean done = false;
             String prefix = "data: ";
-            Iterable<String> lines = () -> response.body().iterator();
-            for (String line : lines) {
-                if (done || !line.startsWith(prefix)) {
+            for (String line : (Iterable<? extends String>) response.body() :: iterator) {
+                if (done) {
+                    break;
+                }
+                if (!line.startsWith(prefix)) {
                     continue;
                 }
                 String payload = line.substring(prefix.length()).trim();

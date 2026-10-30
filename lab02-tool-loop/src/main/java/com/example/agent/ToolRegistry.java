@@ -1,23 +1,22 @@
 package com.example.agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 public class ToolRegistry {
 
-    Logger logger = LoggerFactory.getLogger(getClass());
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    private final Logger logger = LoggerFactory.getLogger(getClass());
 
     private final Map<String, Tool> tools = new LinkedHashMap<>();
-
-    private final ObjectMapper mapper = new ObjectMapper();
 
     public void register(Tool tool){
         tools.put(tool.name(), tool);
@@ -29,25 +28,14 @@ public class ToolRegistry {
      */
     public String toToolsJson(){
         try {
-            ArrayNode root = mapper.createArrayNode();
+            List<ToolItem> toolItems = new ArrayList<>();
             for (Map.Entry<String, Tool> entry : tools.entrySet()) {
                 Tool tool = entry.getValue();
-                ObjectNode item = mapper.createObjectNode();
-                item.put("type", "function");
-
-                // function
-                ObjectNode objectNode = mapper.createObjectNode();
-                objectNode.put("name", tool.name());
-                objectNode.put("description", tool.description());
-
-                // parameter 对象
-                JsonNode jsonNode = mapper.readTree(tool.parametersJsonSchema());
-                objectNode.putIfAbsent("parameters", jsonNode);
-
-                item.putIfAbsent("function", objectNode);
-                root.add(item);
+                ToolFunction toolFunction = new ToolFunction(tool.name(), tool.description(), mapper.readTree(tool.parametersJsonSchema()));
+                ToolItem toolItem = new ToolItem("function", toolFunction);
+                toolItems.add(toolItem);
             }
-            return mapper.writeValueAsString(root);
+            return mapper.writeValueAsString(toolItems);
         } catch (Exception e) {
             logger.error("Error while tool json", e);
             throw new RuntimeException(e);
@@ -75,5 +63,29 @@ public class ToolRegistry {
 
     public List<Tool> all(){
         return List.copyOf(tools.values());
+    }
+
+    @Data
+    static class ToolItem{
+        private String type;
+        private ToolFunction function;
+
+        public ToolItem(String type, ToolFunction function) {
+            this.type = type;
+            this.function = function;
+        }
+    }
+
+    @Data
+    static class ToolFunction{
+        private String name;
+        private String description;
+        private Object parameters;
+
+        public ToolFunction(String name, String description, Object parameters) {
+            this.name = name;
+            this.description = description;
+            this.parameters = parameters;
+        }
     }
 }
