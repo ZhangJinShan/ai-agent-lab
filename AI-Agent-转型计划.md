@@ -3013,7 +3013,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 
 ### 每周任务
 
-**第 5 周:文档摄入流水线**
+### **第 5 周:文档摄入流水线**
 
 - [ ] `DocumentLoader`:读取目录下所有 .md/.pdf
 - [ ] `TextSplitter`(手写,不许用现成的):
@@ -3022,7 +3022,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
   - **思考题**:切太大 retrieval 不准,切太小丢上下文,你打算怎么验证?把假设写下来,第 9 周用评估回答它
 - [ ] `IngestCommand`:命令行跑一遍摄入,打印「加载 N 篇 → 切出 M 块 → 入库」
 
-**第 6 周:检索 + 带引用的回答**
+第 6 周:检索 + 带引用的回答**
 
 - [ ] `Retriever`:问题 → embedding → top-k(先 k=5)→ 返回带元数据的块
 - [ ] **回答模板**(自己调,这是 prompt 工程的第一课):
@@ -3042,7 +3042,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 - [ ] 「不知道」路径:检索分数低于阈值(k=5 的 top1 score < 0.3,先拍个数,第 9 周校准)时直接拒答
 - [ ] **单元测试**:构造 5 个「文档里有的问题」+ 3 个「文档里没有的幻觉诱导问题」,测「不知道」路径
 
-**第 7 周:用 Spring AI 重构**
+### **第 7 周:用 Spring AI 重构**
 
 - [ ] 把第 5–6 周的逻辑迁移到 Spring AI:`ChatClient` + `VectorStore` + `@Tool`(或 `MethodToolCallback`)
 - [ ] 对照表写进 README(面试必讲):
@@ -3056,7 +3056,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 
 - [ ] 🐍 Python 对照:用 LlamaIndex 跑同一份文档的 RAG,对比检索结果差异
 
-**第 8 周:评估体系(项目含金量的一半在这里)**
+### **第 8 周:评估体系(项目含金量的一半在这里)**
 
 - [ ] 建 `eval/dataset.jsonl`,**自己出题** 50 条:
 
@@ -3081,6 +3081,579 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 - [ ] prompt(有无引用格式要求)
 - [ ] 基于评估结果写**优化报告**:改了什么 → 指标变化 → 结论
 - [ ] 加缓存:相同问题(embedding 相似度 > 0.95)直接命中缓存,记录命中率
+
+## 第 5 周:文档摄入流水线(项目一 · doc-qa)
+
+### 今天要干什么(每天约 2 小时,共 5 天)
+
+- [x] **Day 1**:project01 工程骨架 + 测试文档集 + `DocumentLoader`(读 .md)
+- [ ] **Day 2**:`TextSplitter` 手写切块(本周核心,不许用现成的)
+- [ ] **Day 3**:PDF 支持(Apache Tika)+ 元数据完善
+- [ ] **Day 4**:Embedding + SimpleVectorStore 入库 + `IngestCommand`
+- [ ] **Day 5**:摄入流水线测试 + README + 思考题假设归档
+
+**本周工程结构**(Day 1 建):
+
+```
+ai-agent-lab/
+└── project01-doc-qa/                    ← 项目一,第 5-9 周持续迭代
+    ├── pom.xml                          ← Spring Boot 4.x + Spring AI(第一个 Spring 项目!)
+    ├── docs/                            ← 测试文档集(自己写!第 8 周评估出题的原料)
+    │   ├── 接口文档.md
+    │   ├── 故障手册.md
+    │   └── 配置说明.md
+    └── src/
+        ├── main/java/com/example/docqa/
+        │   ├── DocQaApplication.java    ← Spring Boot 入口
+        │   └── ingest/
+        │       ├── Document.java        ← Day 1:加载出的文档(source + content)
+        │       ├── DocumentLoader.java  ← Day 1:递归读目录下所有 .md/.pdf
+        │       ├── Chunk.java           ← Day 2:切块结果(source/heading/chunkIndex/text)
+        │       └── TextSplitter.java    ← Day 2:手写切块(核心链路,铁律:手敲)
+        │   └── ...                      ← Day 4:Embedding + 入库 + IngestCommand
+        └── test/java/com/example/docqa/
+            └── TextSplitterTest.java    ← Day 2:纯逻辑单测,不调 API
+```
+
+> **铁律提醒(第 5–9 周)**:允许 AI 写样板代码(实体类、配置类),**核心链路(切块/检索/评估)必须手写**。Day 2 的 `TextSplitter` 就是本周的核心链路——它的质量直接决定第 6 周检索准不准、第 8 周评估分数好不好看,写它的手感就是这个项目的护城河。
+
+---
+
+### Day 1:project01 工程骨架 + DocumentLoader(约 2 小时)
+
+**今天建好项目一的地基。** 目标:Spring Boot 工程跑起来,`DocumentLoader` 把 `docs/` 目录下的 .md 全部读进来,打印「加载 N 篇」。今天不切块、不向量化——摄入流水线四环(加载 → 切块 → 向量化 → 入库),今天只做第一环。
+
+#### 1.1 先想清楚:摄入流水线的全景
+
+```
+docs/ 目录(一堆 .md/.pdf)
+   │ ① DocumentLoader  ← 今天:把文件变成 Document(source + 原文)
+   ▼
+List<Document>
+   │ ② TextSplitter    ← 明天:把长文切成检索友好的小块
+   ▼
+List<Chunk>
+   │ ③ Embedding       ← Day 4:文本变向量
+   ▼
+向量 + 元数据
+   │ ④ VectorStore 入库 ← Day 4:存起来供检索
+   ▼
+可检索的知识库
+```
+
+写代码前先把这条流水线画进 README——第 6~9 周的所有迭代都是在这四个框上动刀。
+
+#### 1.2 建工程(40 分钟)
+
+`project01-doc-qa` —— **仓库里的第一个 Spring Boot 项目**,顺手找回 Spring 的肌肉记忆。IDEA New Project → Spring Initializr(JDK 17、Java、Maven)。关键依赖:
+
+```xml
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.0.x</version>  <!-- 选 Initializr 当前稳定版(2026 年已是 4.x);Spring Boot 4 基线 JDK 17,你机器上的 17 直接能用 -->
+</parent>
+
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+    <!-- Spring AI:Day 4 起用(Embedding/VectorStore),今天先引好。
+         OpenAI 兼容协议 = 你现有的 key 和 MaaS 端点直接能用 -->
+    <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-starter-model-openai</artifactId>
+        <!-- 版本由 spring-ai-bom 统一管理 -->
+    </dependency>
+    <!-- PDF 解析:Day 3 用 -->
+    <dependency>
+        <groupId>org.apache.tika</groupId>
+        <artifactId>tika-parsers-standard-package</artifactId>
+        <version>2.9.x</version>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+```
+
+> 为什么这次引框架了?第二阶段的主线是「用 Spring AI 做出项目」——你已经用 4 周证明自己能裸写,现在框架是工具不是拐杖。对照 lab03 的抽象看 Spring AI 的每个类,这是本阶段的学习姿势。
+
+`application.yml` 今天只写文档目录配置(模型配置 Day 4 再填):
+
+```yaml
+docqa:
+  docs-dir: docs      # 测试文档集目录
+```
+
+#### 1.3 造测试文档集(30 分钟,今天最容易被低估的活)
+
+在项目根建 `docs/` 目录,**自己写 3~5 篇 markdown**,假装是一个团队的内部文档:
+
+| 文件        | 内容                         | 以后的用途                  |
+| --------- | -------------------------- | ---------------------- |
+| `接口文档.md` | 2~3 个接口的路径/参数/限流,分 `##` 小节 | 第 6 周出「限流是多少」这类事实题     |
+| `故障手册.md` | 2~3 个故障场景的现象/原因/处理步骤       | 出「怎么处理 XX 告警」类问题       |
+| `配置说明.md` | 配置项/默认值/注意事项               | 出「trap 题」(文档里没有的说法)的原料 |
+
+要求:每篇 500~1500 字、有清晰的 `##`/`###` 标题层级、**内容要「像真的」**——这批文档是第 8 周评估集出题的原料,今天写得越认真,那时候越省事。顺手埋一个「文档里没有的知识」(比如故意不写某个配置项的上限),给以后的拒答测试用。
+
+#### 1.4 写 Document + DocumentLoader(40 分钟)
+
+```java
+package com.example.docqa.ingest;
+
+/** 加载出的一篇文档:今天只有两个字段,元数据后面逐步丰富 */
+public record Document(String source, String content) {}
+```
+
+`DocumentLoader` 的职责:**递归遍历目录,把每个 .md 读成 Document**。TODO 自己填:
+
+```java
+package com.example.docqa.ingest;
+
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.*;
+
+public class DocumentLoader {
+
+    private final Path docsDir;
+
+    public DocumentLoader(String docsDir) {
+        // TODO: 判空校验 + 检查目录存在(不存在抛 IllegalArgumentException,带上路径方便排查)
+    }
+
+    /** 递归读取目录下所有 .md 文件 */
+    public List<Document> loadAll() throws IOException {
+        // TODO:
+        // 1. Files.walk(docsDir) 递归遍历(或自己写递归)
+        // 2. 过滤 .md(今天只做 .md,PDF 是 Day 3)
+        // 3. 每个文件 Files.readString(path, UTF_8) 读内容
+        // 4. source 用相对 docsDir 的路径(不是绝对路径!换机器就失效)
+        // 5. 空文件跳过还是保留?选一个,写注释说明理由
+    }
+}
+```
+
+三个防御点(老规矩,把输入当不可信):
+
+1. **目录不存在** → 构造函数里就抛,别等到 loadAll 才 NPE
+2. **编码** → 一律显式 UTF-8(Windows 默认 GBK 的坑,第 1 周卡点表见过)
+3. **隐藏文件 / 子目录** → `.DS_Store` 之类的过滤掉;子目录要递归
+
+#### 1.5 运行验证(10 分钟)
+
+用 `CommandLineRunner` 跑一遍,打印「加载 N 篇」+ 每篇 source 和字数。看到 3 篇以上、字数和你写的内容对得上 → Day 1 完成。
+
+#### 1.6 常见卡点
+
+| 现象                                      | 原因 / 解法                                  |
+| --------------------------------------- | ---------------------------------------- |
+| Spring Boot 启动报端口冲突                     | 今天不需要 web,确认引的是 `spring-boot-starter` 不是 `starter-web` |
+| Spring AI 依赖下载失败/版本找不到                  | 用 `spring-ai-bom` 统一管理版本;镜像里没有就加 spring milestone 仓库 |
+| `Files.walk` 读进 target/ 的旧文件            | docs-dir 指错目录;确认是项目根的 `docs/` 不是 classpath |
+| 想直接用 Spring AI 的 MarkdownDocumentReader | 忍住——手写 loader 是为了搞清「source 元数据从哪来」,Reader 是 Day 3 后的可选项 |
+| 中文乱码                                    | `Files.readString(path)` 没显式指定 UTF-8     |
+
+**Day 1 打卡项**:
+
+- [x] project01-doc-qa 建好,Spring Boot 启动成功
+- [x] docs/ 测试文档集 ≥3 篇,有 `##` 标题层级,内容像真实团队文档,埋了 1 个「文档没有的知识」
+- [x] `DocumentLoader` 手写完成:递归、UTF-8、source 用相对路径、防御点齐全
+- [x] 运行看到「加载 N 篇」+ 文件名清单
+- [x] git 提交:`git add -A && git commit -m "W5D1: project01 工程骨架 + DocumentLoader"`
+
+---
+
+### Day 2:TextSplitter 手写切块(约 2 小时,本周核心)
+
+**今天写这个项目里最值钱的一个类。** 目标:把一篇长文档切成「检索友好」的小块——每块 ≤800 字、相邻块重叠 100 字、保留 `source/heading/chunkIndex` 元数据。**手写,不许用 Spring AI 的 TokenTextSplitter / LangChain 的 text_splitter**——切块策略直接决定第 6 周检索准不准、第 8 周评估分数的天花板。
+
+#### 2.1 先想清楚:为什么要切块(15 分钟)
+
+检索的本质是「问题和小段文本比相似度」。整篇文档去比,90% 的内容和问题无关,相似度被稀释;切得太碎,答案被切成两半谁都拼不回来。**切块 = 在「检索粒度」和「上下文完整性」之间找平衡**,这就是它核心链路地位的来源。
+
+三个已知的 trade-off(背下来):
+
+| 切块大小           | 优点                  | 代价                |
+| -------------- | ------------------- | ----------------- |
+| 大(>1000 字)     | 上下文完整,答案不容易被切断      | 检索不准:相似度被无关内容稀释   |
+| 小(<200 字)      | 检索精准                | 丢上下文:「它」指代的上文被切没了 |
+| 800 字 + 100 重叠 | 折中;重叠让答案跨块边界时两边都留线索 | 存储/成本略增           |
+
+**思考题(今天的作业,写进 `notes/chunking-hypothesis.md`)**:「切太大 retrieval 不准,切太小丢上下文」——你打算怎么验证?把**假设**写下来(例:「我猜 400/800/1200 三种粒度里 800 的引用准确率最高,用第 8 周的引用准确率指标验证」),第 9 周切块策略对比实验用评估回答它。**不许写「到时候再看」——控制变量的前提是先有假设。**
+
+#### 2.2 定义 Chunk(10 分钟)
+
+```java
+package com.example.docqa.ingest;
+
+/**
+ * 一个检索单元:原文切片 + 可追溯的元数据。
+ * 元数据是第 6 周「带引用回答」的基础——没有它,答案没法标注 [来源]。
+ */
+public record Chunk(
+        String source,      // 来自哪个文件,如 "接口文档.md"
+        String heading,     // 所在小节标题,如 "登录接口"
+        int chunkIndex,     // 全文档内第几块(0 起),供追溯
+        String text         // 块正文(≤800 字,相邻块可重叠)
+) {}
+```
+
+#### 2.3 切块算法(70 分钟,今天的主体)
+
+**两步走:先分节,再切长节**。先把伪代码写在纸上再落 Java:
+
+```
+输入:Document(source, content)
+第 1 步:按标题分节
+    逐行扫描:
+      - 行以 # ~ ###### 开头 → 新小节开始,heading = 去掉 # 和空格的行首文字
+      - 否则归入当前小节
+      - 第一个标题之前的内容 → heading = ""(前言小节)
+    得到若干 (heading, 小节文本)
+
+第 2 步:小节内按长度切
+    小节文本 ≤ 800 字 → 整块输出
+    小节文本 > 800 字 → 滑动窗口:
+        起点 = 0
+        while 起点 < 文本长度:
+            块 = 文本[起点, min(起点+800, 长度))
+            输出 Chunk(source, heading, 递增的 index, 块)
+            if 到末尾: break
+            起点 += 800 - 100        ← 步进 700,即重叠 100 字
+```
+
+参考骨架,**核心两步必须自己敲**:
+
+```java
+package com.example.docqa.ingest;
+
+import java.util.*;
+
+public class TextSplitter {
+
+    private static final int MAX_CHUNK_SIZE = 800;   // 块上限(字)
+    private static final int OVERLAP = 100;          // 相邻块重叠(字)
+
+    /** 一篇 Document → 若干 Chunk */
+    public List<Chunk> split(Document doc) {
+        // TODO 1: 分节 —— 按标题行切出 (heading, text) 列表
+        // TODO 2: 每节 text 超过 MAX_CHUNK_SIZE 就滑窗切,否则整块
+        // TODO 3: 每块打元数据 source=doc.source(), heading, chunkIndex=全局递增
+        // 校验:OVERLAP < MAX_CHUNK_SIZE(静态块或构造里断言)
+    }
+
+    /** TODO: 滑动窗口切一段长文本,返回文本块列表(元数据在 split 里统一打) */
+    private List<String> slideWindow(String text) { ... }
+}
+```
+
+三个容易踩的细节(边写边想):
+
+1. **重叠是字符级拼接的**:第 2 块开头 100 字 == 第 1 块结尾 100 字——单测盯着这个断言,下标差 1 就露馅(经典 off-by-one)
+2. **heading 归属**:块的 heading 是「它所在小节」的标题;前言小节 heading 用空串还是文件名?选一个写注释
+3. **超长小节的尾块**:`起点+800` 超过长度时截断到实际长度,别越界
+
+#### 2.4 单元测试(25 分钟,纯逻辑不调 API)
+
+`TextSplitterTest`,四个用例:
+
+- [ ] **普通文档**:3 个小节(各 <800 字)→ 恰好 3 块,heading 各归各位
+- [ ] **超长小节**:一个 2000 字的小节 → 块数符合滑窗公式,且**第 2 块开头 100 字 == 第 1 块结尾 100 字**(重叠断言,今天的灵魂断言)
+- [ ] **元数据连续**:chunkIndex 是 0,1,2…,source 全部等于文件名
+- [ ] **边界**:空文本 → 0 块;恰好 800 字 → 1 块(不许切成 2 块)
+
+全绿后,**故意把步进改成 `MAX_CHUNK_SIZE`(去掉重叠)→ 重叠断言必须红 → 改回来**——老规矩,验证测试有效。
+
+#### 2.5 常见卡点
+
+| 现象                        | 原因 / 解法                                  |
+| ------------------------- | ---------------------------------------- |
+| 重叠断言差 1 个字符               | off-by-one:`substring(起点, 起点+800)` 左闭右开;下个起点 = `起点 + 800 - 100` |
+| 块把 markdown 语法切断(代码块断成两半) | 已知局限!今天接受,记 README TODO——「代码块保护」是第 9 周优化实验的候选变量 |
+| 想按 token 数切而不是字符数         | 正确的生产做法,但依赖 tokenizer;今天按字符(中文 1 字 ≈ 1 token 量级),记 TODO |
+| `###` 子标题被提到同一层           | 想清楚 heading 取「最近的标题」还是「最近的 `##`」——取最近标题最简单,记下选择 |
+| 一个字没写就想引 LangChain        | 铁律:核心链路手写。切块的每个取舍亲手摸过,第 9 周调参才有手感        |
+
+**Day 2 打卡项**:
+
+- [ ] `Chunk` + `TextSplitter` 手写完成,**没有引用任何现成 splitter**
+- [ ] 4 个单测全绿,重叠 100 字的断言真实存在(不是恒真断言)
+- [ ] 改坏步进能变红(验证测试有效)
+- [ ] 思考题假设写进 `notes/chunking-hypothesis.md`(有具体假设和验证指标,不是「到时候再看」)
+- [ ] 合上文档,能在 25 分钟内重写出「分节 → 滑窗 → 打元数据」主流程
+- [ ] git 提交:`git add -A && git commit -m "W5D2: TextSplitter 手写切块 + 单测"`
+
+---
+
+### Day 3:PDF 支持(Apache Tika)+ 元数据完善(约 2 小时)
+
+**今天让流水线吃下 PDF。** 目标:`DocumentLoader` 按扩展名分派——.md 直读、.pdf 交给 Tika 解析;并处理一个昨天回避不了的问题:**PDF 没有标题行,TextSplitter 的「按标题分节」对它失效**。
+
+#### 3.1 先想清楚:PDF 和 Markdown 的本质区别
+
+|      | Markdown  | PDF                        |
+| ---- | --------- | -------------------------- |
+| 文本获取 | 直接读文件     | 要解析器从版面里**抽取**(Tika)       |
+| 标题层级 | `##` 行明摆着 | 抽出来的纯文本**没有标题结构**          |
+| 解析质量 | 无损        | 有损:表格变乱码、多空格、换行错乱          |
+| 极端情况 | 几乎没有      | 扫描版 PDF(纯图片)→ **一个字都抽不出来** |
+
+由此得出今天的两个设计决策(想明白再写码):
+
+1. **分派在 Loader 做,不改 Document/Chunk 模型**:`source` 的扩展名就是类型标记,流水线下游不关心它是怎么读进来的
+2. **PDF 的 heading 兜底**:抽出来的文本没有标题行,`TextSplitter` 分节时它就是一个「无标题小节」——**整篇走滑窗切**。昨天把「前言小节 heading 用空串还是文件名」的选择留了注释,今天这个选择开始还债:**建议 PDF 用文件名当 heading**(不然第 6 周引用标注出来是 `[来源:手册.pdf#]`,光秃秃的)
+
+#### 3.2 Tika 解析 PDF(30 分钟)
+
+依赖 Day 1 已引好,用法一行核心代码:
+
+```java
+// 核心:Tika 把任意文件变成纯文本
+org.apache.tika.Tika tika = new org.apache.tika.Tika();
+String text = tika.parseToString(path);   // 抛 IOException/TikaException
+```
+
+> 为什么用 Tika 而不是 pdfbox?——Tika 是「格式探测 + 分派」的统一入口,以后加 Word/Excel 只换文件不用换代码。它底下就是帮你调 pdfbox。
+
+#### 3.3 改造 DocumentLoader(45 分钟)
+
+把 `loadAll()` 的读取环节抽成一个按扩展名分派的方法:
+
+```java
+private Document loadOne(Path path) throws IOException {
+    String source = 相对路径;
+    String ext = 扩展名转小写;
+    // TODO: 分派
+    //   .md  → Files.readString(path, UTF_8)
+    //   .pdf → tika.parseToString(path)
+    //   其他 → 跳过(今天顺手把「不支持的扩展名」也定下来:.txt 收不收?.docx 呢?)
+}
+
+private Document loadPdf(Path path) throws IOException {
+    // TODO: 调 Tika;两个防御:
+    //   1. TikaException/加密 PDF → 不要让一篇坏文档炸掉整批摄入,
+    //      catch 后 log.warn + 返回 null(调用方过滤),失败文档记录下来
+    //   2. 解析结果空白(trim 后为空)= 扫描版 PDF → log.warn「疑似扫描件,需 OCR」+ 返回 null
+}
+```
+
+**今天的防御主题:单篇失败不阻塞整批**——生产上文档库总有几篇坏文件,摄入任务必须「跳过坏的、报出坏的、把好的入库」。这和 W4 重试的哲学一致:错误分类,别让局部失败毁掉全局。
+
+#### 3.4 验证(25 分钟)
+
+1. **手边找一篇真实 PDF**(说明书、论文、随便什么)丢进 `docs/`,跑摄入,确认解析出的文本可读
+2. 找不到真 PDF 就自己「打印网页为 PDF」造一篇
+3. **故意丢一篇扫描版 PDF**(或任何抽不出文字的文件)进去,确认:log 里有警告、其他文档照常入库、程序不崩
+
+#### 3.5 常见卡点
+
+| 现象                                   | 原因 / 解法                                  |
+| ------------------------------------ | ---------------------------------------- |
+| Tika 依赖下载巨慢/几十 MB                    | `tika-parsers-standard-package` 就是这么大(全家桶);嫌大换 `tika-parser-pdf-module`(只 PDF),README 记录选型理由 |
+| PDF 解析出来一堆换行/空格乱码                    | 有损解析的常态;今天不修,记 TODO——第 9 周优化实验的候选变量      |
+| 扫描版 PDF 解析结果是空串                      | 预期!按 3.3 的防御处理;真要支持需要 OCR(Tesseract),超出本阶段范围,记 README |
+| `parseToString` 抛加密异常                | 同「单篇失败不阻塞整批」,catch → warn → 跳过           |
+| TextSplitter 对 PDF 切出来的块 heading 全是空 | 回看 3.1 决策 2:PDF 用文件名当 heading,改 split() 的兜底分支 |
+
+**Day 3 打卡项**:
+
+- [ ] `loadAll()` 按扩展名分派:.md 直读 / .pdf 走 Tika / 其他跳过
+- [ ] 单篇失败不阻塞整批:坏 PDF/扫描件有 warn 日志,其余文档照常入库
+- [ ] 真实 PDF 验证过解析文本可读;扫描件(或空文本)验证过被优雅跳过
+- [ ] PDF 的 heading 兜底决策落地并写了注释
+- [ ] git 提交:`git add -A && git commit -m "W5D3: PDF 支持(Tika)+ 元数据完善"`
+
+---
+
+### Day 4:Embedding + VectorStore 入库 + IngestCommand(约 2 小时)
+
+**今天打通摄入流水线最后一环。** 目标:加载 → 切块 → 向量化 → 入库一条龙跑通,命令行打印「加载 N 篇 → 切出 M 块 → 入库」。跑完你会第一次拥有一个**可检索的知识库**——虽然检索是下周的活。
+
+#### 4.1 先想清楚:embedding 是什么(15 分钟)
+
+一句话:**embedding 模型把一段文本变成一个几百~几千维的向量,语义相近的文本向量也相近**。检索就是把「问题」和「块」都变成向量,算距离取最近的 k 个——这就是第 6 周 Retriever 的全部原理。
+
+| 概念           | 对应到你的代码                                  |
+| ------------ | ---------------------------------------- |
+| embedding 模型 | 供应商的 `/embeddings` 接口(和 chat 同一个 key/端点) |
+| 向量维度         | 模型决定(如 1024/1536),**记录进 README**(技术选型表里的要求) |
+| VectorStore  | 存向量+原文+元数据的库;入门期用 Spring AI 的 SimpleVectorStore(内存版) |
+
+选型决策(按技术选型表):embedding **跟随你的 MaaS 供应商**,在模型广场找 embedding 型号(如 `text-embedding-v4` 之类),把确切模型名和维度写进 README。费用按 token 计,今天摄入几篇文档的花费可以忽略。
+
+#### 4.2 Spring AI 配置(30 分钟)
+
+`application.yml` 把 Day 1 留的坑填上(OpenAI 兼容协议,你的 key/端点直接用):
+
+```yaml
+spring:
+  ai:
+    openai:
+      api-key: ${LLM_API_KEY}
+      base-url: https://你的MaaS端点/compatible-mode/v1
+      chat:
+        options:
+          model: glm-5.3          # 第 6 周回答用
+      embedding:
+        options:
+          model: text-embedding-xxx   # 今天用,填供应商的真实型号
+```
+
+Spring AI 自动装配 `EmbeddingModel` bean,调用就一行(精确签名以官方文档为准,概念是「文本进、向量出」):
+
+```java
+EmbeddingModel embeddingModel = ...;  // 构造器注入
+float[] vector = embeddingModel.embed(chunk.text());
+```
+
+**入库**:`SimpleVectorStore` 是 Spring AI 的内存向量库——注意它**重启即失**,摄入必须能重跑(每次全量重建,今天的量无所谓)。关键一步是 **Chunk → Spring AI Document 的转换**:把 `source/heading/chunkIndex` 塞进 metadata map,否则第 6 周引用标注无从谈起:
+
+```java
+// 概念示意(字段名以官方文档为准):
+// new org.springframework.ai.document.Document(
+//     chunk.text(),
+//     Map.of("source", chunk.source(), "heading", chunk.heading(),
+//            "chunkIndex", String.valueOf(chunk.chunkIndex())))
+// → vectorStore.add(List.of(...))
+```
+
+#### 4.3 IngestCommand(30 分钟)
+
+把流水线串成一个命令入口(`CommandLineRunner` 或 `@RestController` 都行,今天选最朴素的):
+
+```
+运行输出(这就是验收标准):
+加载 3 篇(1 篇失败:扫描件.pdf)
+切出 17 块
+入库 17 块,向量维度 1536
+耗时 8.2s
+```
+
+两个工程细节:
+
+1. **逐块调 embedding 失败怎么办**——同 Day 3 哲学:失败的块记错误跳过,别让一块毁掉整批;成功入库数要如实打印(入库 17 块里能看出漏没漏)
+2. **计时**——摄入是批量任务,耗时是它的性能指标,顺手打出来
+
+#### 4.4 冒烟验证(15 分钟):入库了,真的能查吗
+
+「入库成功」不能只看打印——写个临时 main(或测试)用 `similaritySearch` 查一句和文档相关的问题,看 top-3 是不是相关块:
+
+```java
+// 概念示意:vectorStore.similaritySearch("登录接口的限流是多少")
+// → 打印 top-3 的 text 开头 + source/heading 元数据
+// 期望:top-1 是接口文档里讲限流的那个块
+```
+
+这是**冒烟测试不是评估**(不看分数看命中),正式检索和「不知道就拒答」是第 6 周的活——但今天必须看到「查限流 → 出限流块」这个体感,否则入库的正确性无从确认。
+
+#### 4.5 常见卡点
+
+| 现象                     | 原因 / 解法                                  |
+| ---------------------- | ---------------------------------------- |
+| embedding 调用 404/400   | 模型名写错(去供应商模型广场抄确切型号);部分 MaaS 的 embedding 是独立模型名,不是 chat 模型 |
+| 向量维度和文档对不上             | README 记维度是本打卡项;换模型=换维度,旧向量全作废(SimpleVectorStore 全量重建正好免疫) |
+| 一次 embed 一批报错          | 某些兼容端点不支持批量入参,改逐条循环调用                    |
+| similaritySearch 结果不对劲 | 先别怀疑模型——多半是元数据没塞对/块文本是空的;把入库的块打印出来肉眼看    |
+| 想现在就做「不知道就拒答」          | 忍住,第 6 周的事;今天只验「查得到」                     |
+
+**Day 4 打卡项**:
+
+- [ ] `IngestCommand` 一条龙跑通,输出「加载 N 篇 → 切出 M 块 → 入库」三段统计
+- [ ] embedding 模型名 + 向量维度记录进 README
+- [ ] Chunk 元数据(source/heading/chunkIndex)进了 VectorStore 的 metadata
+- [ ] 冒烟验证:查「限流」类问题,top-3 能命中相关块
+- [ ] git 提交:`git add -A && git commit -m "W5D4: Embedding + VectorStore 入库 + IngestCommand"`
+
+---
+
+### Day 5:摄入流水线测试 + README + 思考题归档(约 2 小时)
+
+**今天不写新功能,把这周锁进保险箱。** 目标:摄入流水线的自动化测试补齐(能离线跑)、README 写成「别人能跑起来」、思考题假设归档,然后周自检。
+
+#### 5.1 测试策略:什么进单测,什么不进(15 分钟)
+
+老规矩(第 1 周 Day 5 的道理原样平移):**单测测的是「你的管线写对没」,不是「模型/向量质量好不好」**。
+
+| 环节             | 进单测吗        | 怎么测                                      |
+| -------------- | ----------- | ---------------------------------------- |
+| TextSplitter   | ✅(Day 2 已测) | 纯逻辑                                      |
+| DocumentLoader | ✅ 今天补       | `@TempDir` 临时目录造文件,不碰 docs/              |
+| Embedding + 入库 | ✅ 测管线串接     | **Fake EmbeddingModel**:固定返回一个假向量,不调真 API |
+| 检索质量           | ❌           | 第 8 周评估体系的活                              |
+
+#### 5.2 补测试(50 分钟)
+
+**DocumentLoaderTest**(`@TempDir`,四个用例):
+
+- [ ] 递归:子目录里的 .md 也被读到
+- [ ] 过滤:.txt/.DS_Store 被跳过
+- [ ] UTF-8:写入中文内容,读回一致
+- [ ] 空目录/不存在目录:行为符合你 Day 1 的注释选择
+
+**IngestPipelineTest(Fake EmbeddingModel 版)**:
+
+```java
+// Fake EmbeddingModel:实现 EmbeddingModel 接口,embed() 返回固定向量(如 new float[]{1,0,0,...})
+// 注入进管线 → 跑 loadAll → split → 入库
+// 断言:
+//   1. 3 篇文档切出的块总数 == 手算的预期值
+//   2. VectorStore 里能查到条目(similaritySearch 用假向量也能跑通链路)
+//   3. 元数据:抽一块断言 source/heading/chunkIndex 正确
+```
+
+> Fake EmbeddingModel 就是 lab01 FakeLlmServer 思路的 Spring 版:**把不确定的外部依赖换成确定的桩,测自己的逻辑**。这是你第三次用这个思想了——单测、桩服务、fake bean,一脉相承。
+
+全绿后老规矩:**故意把滑窗步进改坏 → 必须有测试变红**。
+
+#### 5.3 写 README(30 分钟)
+
+project01 的 README(单模块 README,不是仓库根):
+
+```markdown
+# project01-doc-qa — 团队文档问答 Agent(第 5 周:摄入流水线)
+
+## 流水线(贴 1.1 的四环图)
+## 快速开始
+- 环境 / LLM_API_KEY / application.yml 配置
+- 一次摄入:mvn spring-boot:run(或命令行)
+## 我实现了什么
+- DocumentLoader:.md 直读 + .pdf(Tika),单篇失败不阻塞整批
+- TextSplitter:手写「分节 → 滑窗(800/100)→ 元数据」
+- IngestCommand:加载 N 篇 → 切出 M 块 → 入库
+## 切块策略(为什么是 800/100 + 两个 TODO:代码块保护、token 级切块)
+## Embedding(模型名 / 向量维度 / 供应商)
+## 踩坑记录(挑 5 条)
+## 思考题假设 → notes/chunking-hypothesis.md(链接过去)
+```
+
+#### 5.4 思考题归档 + 周自检(25 分钟)
+
+- [ ] `notes/chunking-hypothesis.md` 定稿:假设具体、验证指标明确(第 8 周的三个指标里用哪个)、对比变量写清(400/800/1200?)
+- [ ] **周自检(诚实回答)**:
+  - [ ] 合上文档,「分节 → 滑窗 → 打元数据」能徒手写出来?
+  - [ ] 切块的三个 trade-off 能脱口而出?800/100 的选择理由能讲清?
+  - [ ] 摄入流水线四环能画出来,每环的输入输出是什么?
+  - [ ] 这周有没有哪段核心代码(尤其 TextSplitter)是复制粘贴的?有就删掉重写
+- [ ] 进度日志:附录 C 填 W5 一行
+- [ ] git 提交:`git add -A && git commit -m "W5D5: 摄入流水线测试 + README + 周自检"`
+
+**Day 5 打卡项**:
+
+- [ ] DocumentLoaderTest(4 个)+ IngestPipelineTest(Fake EmbeddingModel)全绿
+- [ ] 改坏步进有测试变红(验证测试有效)
+- [ ] README 按 5.3 骨架写完(含 embedding 维度和切块 TODO)
+- [ ] 思考题假设定稿归档
+- [ ] 周自检 4 条诚实过关
+
+### **
+
+---
 
 ### 📦 项目一交付物
 
