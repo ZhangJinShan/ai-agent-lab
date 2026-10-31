@@ -3498,12 +3498,12 @@ spring:
       api-key: ${LLM_API_KEY}
       base-url: https://你的MaaS端点/compatible-mode/v1
       chat:
-        options:
-          model: glm-5.3          # 第 6 周回答用
+        model: glm-5.3              # 第 6 周回答用(替代过期的 chat.options.model)
       embedding:
-        options:
-          model: text-embedding-xxx   # 今天用,填供应商的真实型号
+        model: text-embedding-xxx   # 今天用,填供应商的真实型号(替代过期的 embedding.options.model)
 ```
+
+> Spring AI 2.x 把「模型名」提到了一级属性:`*.options.model` 已过期(IDEA 会划线),新写法是 `chat.model` / `embedding.model`;`options.*` 名下保留的是采样/生成参数(temperature/maxTokens 等)。另有 `spring.ai.openai.model` 可做全局兜底——chat 和 embedding 用不同模型时不用它。
 
 Spring AI 自动装配 `EmbeddingModel` bean,调用就一行(精确签名以官方文档为准,概念是「文本进、向量出」):
 
@@ -3562,13 +3562,119 @@ float[] vector = embeddingModel.embed(chunk.text());
 | similaritySearch 结果不对劲 | 先别怀疑模型——多半是元数据没塞对/块文本是空的;把入库的块打印出来肉眼看    |
 | 想现在就做「不知道就拒答」          | 忍住,第 6 周的事;今天只验「查得到」                     |
 
+#### 4.6 实战补充:EmbeddingModel 初始化 + 顺着 verifyLoad 走完流水线(对照写)
+
+**EmbeddingModel 怎么初始化?——注入,不是 new。** `spring-ai-starter-model-openai` 的自动装配(`OpenAiEmbeddingAutoConfiguration`)已经读完 application.yml、把 `EmbeddingModel` bean 建好了。你只有两件事要做:
+
+1. **import 对的类**:`org.springframework.ai.embedding.EmbeddingModel`(Spring AI 的抽象接口)。**不是** `com.openai.models.embeddings.EmbeddingModel`——那是底层 OpenAI SDK 的类,Spring AI 用它干活但你不要直接碰;换供应商时抽象接口不用换,底层类会换
+2. **把 bean 注入进来**:在 `@Bean` 方法的参数里声明即可,Spring 按类型注入
+
+```java
+@Bean
+CommandLineRunner verifyLoad(DocumentLoader loader, EmbeddingModel embeddingModel) {
+    //                                          ↑ 就这么简单,没有 new
+}
+```
+
+> 这不是偷懒,是自动装配的意义:模型型号/端点/key 全在 yml 里,换模型改配置不改代码。
+
+**补一个依赖**(`spring-ai-vector-store` 不在 starter 里,版本由 BOM 管):
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-vector-store</artifactId>
+</dependency>
+```
+
+**Chunk → Spring AI Document:元数据进 metadata Map**。注意**包名撞车**:你自己有 `com.example.docqa.ingest.Document`,Spring AI 有 `org.springframework.ai.document.Document`,两个同名——转换方法里用全限定名,别 import 打架:
+
+```java
+private org.springframework.ai.document.Document toSpringDoc(Chunk chunk) {
+    // source/heading/chunkIndex 进 metadata —— 第 6 周引用标注靠它,别漏
+    return new org.springframework.ai.document.Document(
+            chunk.text(),
+            Map.of("source", chunk.source(),
+                   "heading", chunk.heading(),
+                   "chunkIndex", String.valueOf(chunk.chunkIndex())));
+}
+```
+
+**VectorStore bean**(内存版,重启即失 → 摄入要能重跑,每次全量重建):
+
+```java
+@Bean
+VectorStore vectorStore(EmbeddingModel embeddingModel) {
+    return SimpleVectorStore.builder(embeddingModel).build();
+}
+```
+
+**完整流程对照(顺着你 verifyLoad 的「加载 → 切割 → ? → ?」走完后两环)**:
+
+```java
+@Bean
+CommandLineRunner verifyLoad(DocumentLoader loader, TextSplitter splitter,
+                             EmbeddingModel embeddingModel, VectorStore vectorStore) {
+    return args -> {
+        // ① 加载(你已完成)
+        List<Document> docs = loader.loadAll();
+        log.info("加载 {} 篇", docs.size());
+
+        // ② 切割(你已完成)—— 顺手修一处:substring(0,100) 在 content 不足 100 字时会越界
+        List<Chunk> chunks = new ArrayList<>();
+        for (Document doc : docs) {
+            int previewLen = Math.min(doc.content().length(), 100);
+            log.info("  {} ({}字): {}", doc.source(), doc.content().length(),
+                     doc.content().substring(0, previewLen));
+            chunks.addAll(splitter.split(doc));
+        }
+        log.info("切出 {} 块", chunks.size());
+
+        // ③ 向量化:演示一次,看维度(记进 README 的就是这个数)
+        //    SimpleVectorStore.add() 内部会对每块自动调 embed,
+        //    所以这里单独 embed 一次只为「看见」向量,不是重复计费的浪费
+        if (!chunks.isEmpty()) {
+            float[] vector = embeddingModel.embed(chunks.get(0).text());
+            log.info("向量维度: {}", vector.length);
+        }
+
+        // ④ 存储:Chunk 转 Spring AI Document(元数据进 metadata),批量入库
+        List<org.springframework.ai.document.Document> springDocs =
+                chunks.stream().map(this::toSpringDoc).toList();
+        vectorStore.add(springDocs);
+        log.info("入库 {} 块", springDocs.size());
+
+        // ⑤ 冒烟验证:查一句文档里有的问题,top-3 应命中「登录接口」那个块
+        var results = vectorStore.similaritySearch(
+                SearchRequest.builder().query("登录接口的限流是多少").topK(3).build());
+        for (org.springframework.ai.document.Document r : results) {
+            log.info("[命中] {}#{}: {}", r.getMetadata().get("source"),
+                     r.getMetadata().get("heading"), r.getText().substring(0, 40));
+        }
+    };
+}
+```
+
+> 建议把这段逻辑从 Application 里挪进独立类 `IngestCommand implements CommandLineRunner`(打卡项的名字对上),Application 里 `@Bean IngestCommand` 注册——「入口归入口,命令归命令」。
+
+**签名速查**(javap 对 2.0.2 验证过,放心对照):
+
+| 调用      | 签名                                       |
+| ------- | ---------------------------------------- |
+| 单条向量化   | `float[] embed(String text)`             |
+| 批量      | `List<float[]> embed(List<String> texts)` |
+| 查维度     | `int dimensions()`(不用 embed 也能问)         |
+| 建文档     | `new Document(String text, Map<String,Object> metadata)` |
+| 建 store | `SimpleVectorStore.builder(embeddingModel).build()` |
+| 检索      | `SearchRequest.builder().query(q).topK(k).build()` → `vectorStore.similaritySearch(req)` |
+
 **Day 4 打卡项**:
 
-- [ ] `IngestCommand` 一条龙跑通,输出「加载 N 篇 → 切出 M 块 → 入库」三段统计
-- [ ] embedding 模型名 + 向量维度记录进 README
-- [ ] Chunk 元数据(source/heading/chunkIndex)进了 VectorStore 的 metadata
-- [ ] 冒烟验证:查「限流」类问题,top-3 能命中相关块
-- [ ] git 提交:`git add -A && git commit -m "W5D4: Embedding + VectorStore 入库 + IngestCommand"`
+- [x] `IngestCommand` 一条龙跑通,输出「加载 N 篇 → 切出 M 块 → 入库」三段统计
+- [x] embedding 模型名 + 向量维度记录进 README
+- [x] Chunk 元数据(source/heading/chunkIndex)进了 VectorStore 的 metadata
+- [x] 冒烟验证:查「限流」类问题,top-3 能命中相关块
+- [x] git 提交:`git add -A && git commit -m "W5D4: Embedding + VectorStore 入库 + IngestCommand"`
 
 ---
 

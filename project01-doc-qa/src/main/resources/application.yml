@@ -15,6 +15,9 @@ spring:
       api-key: ${LLM_API_KEY:sk-not-configured}
       base-url: https://llm-t434y2d2k03iub6z.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
       # chat / embedding 的模型名 Day 4 再填
-
+      chat:
+        model: glm-5.3
+      embedding:
+        model: qwen3.7-text-embedding-flash
 docqa:
   docs-dir: docs      # 文档路径(相对启动工作目录,IDEA 运行配置里设 $MODULE_DIR$)

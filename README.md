@@ -320,3 +320,29 @@ FakeLlmServer 补了三个流式剧本:`TRIGGER_SLOW_STREAM`(先吐字再沉默)
 - [ ] 合上文档,2 小时内手写出 tool use 循环(写完和 lab02 对 diff,想不起来的部分删掉重写)
 - [ ] 消息流转图能给同事讲明白(加码:找个人 15 分钟讲「Agent = while 循环 + 变长消息列表」+ 流转图)
 - [ ] lab03 的 memory 整组裁剪 / config 校验 / 超时三预算,每处取舍理由能口述
+
+---
+
+# project01-doc-qa — 团队文档问答 Agent(第二阶段 · 进行中)
+
+> 状态:第 5 周(文档摄入流水线)建设中,本节先落硬数据,随进度补全。
+
+## Embedding(模型名 / 向量维度 / 供应商)
+
+| 项 | 值 |
+|---|---|
+| 供应商 | 阿里云百炼 MaaS(OpenAI 兼容协议) |
+| 模型名 | `qwen3.7-text-embedding-flash` |
+| 向量维度 | **1024** |
+| 接口 | `POST /compatible-mode/v1/embeddings` |
+| 配置位置 | `application.yml` → `spring.ai.openai.embedding.model` |
+
+**换模型注意事项**:换 embedding 模型 = 换向量维度,旧向量全部作废必须重建索引——
+SimpleVectorStore 每次摄入全量重建,天然免疫这个问题;换 Milvus/PGVector 后要注意。
+
+## 待补全(随项目进度)
+
+- 摄入流水线(加载 → 切块 → 向量化 → 入库 四环图)
+- 切块策略(800/100 + 两个 TODO:代码块保护、token 级切块)
+- 踩坑记录 / 思考题假设(→ notes/chunking-hypothesis.md)
+- 手写 vs Spring AI 对照表(第 7 周)
