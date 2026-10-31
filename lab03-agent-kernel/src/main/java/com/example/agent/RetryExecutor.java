@@ -1,6 +1,9 @@
 package com.example.agent;
 
+import com.example.exception.LlmException;
+import com.example.exception.LlmTimeoutException;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +24,7 @@ public class RetryExecutor {
     private final long baseDelayMs;
 
     /** 最近一次 execute 实际执行了几次（1=一次成功没重试），方便断言测试 */
+    @Getter
     private volatile int lastAttemptCount;
 
     public RetryExecutor(int maxAttempts, long baseDelayMs) {
@@ -109,23 +113,22 @@ public class RetryExecutor {
             if (t instanceof LlmTimeoutException) {
                 return true; // 静默超时 = 网络/服务端抖动,重试能改变结果
             }
-            if (t instanceof HttpTimeoutException || t instanceof ConnectException || t instanceof IOException) {
+            if (t instanceof HttpTimeoutException || t instanceof ConnectException) {
                 return true; // 超时 / 连接被拒 / 连接重置 -> 网络抖动
             }
+            if (t instanceof IOException) {
+                return true;
+            }
+
         }
         return false; // 默认不重试: 截断、业务异常、解析失败……
     }
-
-    public int getLastAttemptCount(){
-        return lastAttemptCount;
-    }
-
 
     /** 拼出整条 cause 链:ConnectException: null <- ... */
     private static String describe(Throwable e) {
         StringBuilder sb = new StringBuilder();
         for (Throwable t = e; t != null; t = t.getCause()) {
-            if (sb.length() > 0) {
+            if (!sb.isEmpty()) {
                 sb.append(" <- ");
             }
             sb.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());

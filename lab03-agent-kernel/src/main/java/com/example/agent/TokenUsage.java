@@ -10,9 +10,10 @@ import java.util.concurrent.atomic.LongAdder;
  * @create: 2026/10/25
  **/
 public class TokenUsage {
-
+    // 输入 token
     private final LongAdder promptTokens = new LongAdder();
 
+    // 输出 token
     private final LongAdder completionTokens = new LongAdder();
 
     private final LongAdder calls = new LongAdder();

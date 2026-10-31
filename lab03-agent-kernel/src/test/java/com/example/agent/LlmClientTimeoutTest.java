@@ -1,5 +1,7 @@
 package com.example.agent;
 
+import com.example.config.AgentConfig;
+import com.example.llm.LlmClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

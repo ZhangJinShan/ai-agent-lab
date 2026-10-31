@@ -1,5 +1,9 @@
-package com.example.agent;
+package com.example.llm;
 
+import com.example.config.AgentConfig;
+import com.example.exception.LlmException;
+import com.example.exception.LlmTimeoutException;
+import com.example.agent.RetryExecutor;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -11,11 +15,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.temporal.TemporalUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -106,7 +108,10 @@ public class LlmClient {
                         throw new LlmTimeoutException("流式静默超时: " + silentMs + "ms 没收到 chunk");
                     }
                     lastActivity = System.currentTimeMillis();   // 收到行 = 有进展
-                    if (done || !line.startsWith(prefix)) {
+                    if (done) {
+                        break;
+                    }
+                    if (!line.startsWith(prefix)) {
                         continue;
                     }
                     String payload = line.substring(prefix.length()).trim();

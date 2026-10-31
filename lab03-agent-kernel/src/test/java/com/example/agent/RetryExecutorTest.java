@@ -1,5 +1,6 @@
 package com.example.agent;
 
+import com.example.exception.LlmException;
 import org.junit.jupiter.api.Test;
 
 import java.net.http.HttpTimeoutException;

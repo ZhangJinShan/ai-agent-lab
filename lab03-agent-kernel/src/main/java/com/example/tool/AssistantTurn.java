@@ -1,4 +1,4 @@
-package com.example.agent;
+package com.example.tool;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -19,15 +19,7 @@ public record AssistantTurn(String content, List<ToolCall> toolCalls) {
             message.put("content", content);
         }
         if (!toolCalls.isEmpty()) {
-            List<Map<String, Object>> tools = new LinkedList<>();
-            for (ToolCall toolCall : toolCalls) {
-                Map<String, Object> tool = new LinkedHashMap<>();
-                tool.put("id", toolCall.id());
-                tool.put("type", "function");
-                tool.put("function", Map.of("name", toolCall.name(), "arguments", toolCall.argsJson()));
-                tools.add(tool);
-            }
-            message.put("tool_calls", tools);
+            message.put("tool_calls", toolCalls);
         }
         return message;
     }

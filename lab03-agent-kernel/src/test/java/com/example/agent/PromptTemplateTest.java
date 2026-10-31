@@ -1,5 +1,6 @@
 package com.example.agent;
 
+import com.example.prompt.PromptTemplate;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;

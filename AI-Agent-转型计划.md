@@ -1436,7 +1436,7 @@ public String chatCompletions(List<Map<String, Object>> messages, String toolsJs
 
 #### 2.2 Tool 抽象(15 分钟)
 
-`com.example.agent.Tool`:
+`com.example.tool.Tool`:
 
 ```java
 package com.example.agent;
@@ -1479,7 +1479,7 @@ public record Tool(
 
 #### 2.4 ToolRegistry(45 分钟,今天的主体)
 
-`com.example.agent.ToolRegistry`,**`toToolsJson()` 的 TODO 必须自己填**:
+`com.example.tool.ToolRegistry`,**`toToolsJson()` 的 TODO 必须自己填**:
 
 ```java
 package com.example.agent;
@@ -2418,8 +2418,8 @@ System.out.println(agent.chat("北京和上海哪个温度高?"));  // 工具循
 - [x] **Day 1**:结构化日志(JSON + traceId 贯穿)
 - [x] **Day 2**:Token 统计 + 算钱
 - [x] **Day 3**:重试(手写指数退避)+ 错误分类
-- [ ] **Day 4**:超时体系(连接/读/流式静默超时)
-- [ ] **Day 5**:Python 对照(Agent SDK / LangGraph)+ 第一阶段验收
+- [x] **Day 4**:超时体系(连接/读/流式静默超时)
+- [x] **Day 5**:Python 对照(Agent SDK / LangGraph)+ 第一阶段验收
 
 > 本周全部改在 lab03 里进行,不建新模块。
 

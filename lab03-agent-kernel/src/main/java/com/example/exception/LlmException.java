@@ -1,4 +1,4 @@
-package com.example.agent;
+package com.example.exception;
 
 /**
  * LLM 调用失败的统一异常:状态码放在类型字段里,而不是拼进 message 字符串。

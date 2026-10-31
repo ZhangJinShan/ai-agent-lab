@@ -1,4 +1,4 @@
-package com.example.agent;
+package com.example.prompt;
 
 import java.util.ArrayList;
 import java.util.List;

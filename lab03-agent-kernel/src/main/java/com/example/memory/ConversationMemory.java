@@ -1,4 +1,4 @@
-package com.example.agent;
+package com.example.memory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +41,7 @@ public class ConversationMemory {
     public void clear() { messages.clear(); }
 
     private void trim() {
+        // 非 system 消息没有达到上限，不用裁剪
         if (nonSystemCount() <= maxMessages) {
             return;
         }
@@ -51,6 +52,7 @@ public class ConversationMemory {
                 break; // 终止循环直接返回
             }
             int end = groupEnd(start);
+            // 如果不存在，也不要裁剪了，否则就只剩下 system 消息了，没有上下文了
             if (!hasNonSystemAfter(end)) {
                 break;
             }

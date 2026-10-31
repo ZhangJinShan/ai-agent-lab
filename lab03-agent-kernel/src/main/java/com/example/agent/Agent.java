@@ -1,5 +1,12 @@
 package com.example.agent;
 
+import com.example.config.AgentConfig;
+import com.example.llm.LlmClient;
+import com.example.memory.ConversationMemory;
+import com.example.tool.AssistantTurn;
+import com.example.tool.ToolCall;
+import com.example.tool.ToolCallFunction;
+import com.example.tool.ToolRegistry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,9 +26,9 @@ import java.util.UUID;
  **/
 public class Agent {
 
-    Logger logger = LoggerFactory.getLogger(Agent.class);
+    private final Logger logger = LoggerFactory.getLogger(Agent.class);
 
-    private ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     private final LlmClient llm;
 
@@ -73,7 +80,7 @@ public class Agent {
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException("LLM 响应不是合法 JSON: " + response, e);
                 }
-                // 统计 token 用度
+                // 每次调完 llm，就统计 token 用度
                 tokenUsage.record(root.path("usage"));
 
                 AssistantTurn assistantTurn = parseAssistantTurn(root);
@@ -94,8 +101,8 @@ public class Agent {
 
                 // 4. 有工具调用 → 逐个执行,每个结果作为 role=tool 的消息追加
                 for (ToolCall toolCall : toolCalls) {
-                    logger.info("[轮次 {}] 模型请求工具: {}({})", round + 1, toolCall.name(), toolCall.argsJson());
-                    String result = registry.execute(toolCall.name(), toolCall.argsJson());
+                    logger.info("[轮次 {}] 模型请求工具: {}({})", round + 1, toolCall.function().name(), toolCall.function().arguments());
+                    String result = registry.execute(toolCall.function().name(), toolCall.function().arguments());
                     logger.info("[轮次 {}] 工具结果: {}", round + 1, result);
                     memory.add(Map.of("role", "tool", "tool_call_id", toolCall.id(), "content", result));
                     // 统计工具调用次数
@@ -141,8 +148,11 @@ public class Agent {
             for (JsonNode item : toolCallsNode) {
                 ToolCall toolCall = new ToolCall(
                         item.path("id").asText(),
-                        item.path("function").path("name").asText(),
-                        item.path("function").path("arguments").asText()
+                        item.path("type").asText(),
+                        new ToolCallFunction(
+                                item.path("function").path("name").asText(),
+                                item.path("function").path("arguments").asText()
+                        )
                 );
                 toolCalls.add(toolCall);
             }

@@ -1,5 +1,6 @@
 package com.example.agent;
 
+import com.example.memory.ConversationMemory;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;

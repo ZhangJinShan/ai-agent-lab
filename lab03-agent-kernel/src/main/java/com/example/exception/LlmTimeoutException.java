@@ -1,4 +1,4 @@
-package com.example.agent;
+package com.example.exception;
 
 /**
  * @author zhangjinshan

@@ -1,6 +1,12 @@
 package com.example;
 
 import com.example.agent.*;
+import com.example.config.AgentConfig;
+import com.example.llm.LlmClient;
+import com.example.memory.ConversationMemory;
+import com.example.tool.Tool;
+import com.example.tool.ToolFunction;
+import com.example.tool.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -23,7 +29,7 @@ public class KernelMain {
         // 加载配置文件 properties
         Properties properties = getProperties();
         if (null == properties) {
-            logger.error("找不到 application.properties,检查文件是否在 src/main/resources 下");
+            logger.error("properties load error");
             return;
         }
 
