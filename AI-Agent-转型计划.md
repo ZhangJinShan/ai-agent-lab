@@ -3087,8 +3087,8 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 ### 今天要干什么(每天约 2 小时,共 5 天)
 
 - [x] **Day 1**:project01 工程骨架 + 测试文档集 + `DocumentLoader`(读 .md)
-- [ ] **Day 2**:`TextSplitter` 手写切块(本周核心,不许用现成的)
-- [ ] **Day 3**:PDF 支持(Apache Tika)+ 元数据完善
+- [x] **Day 2**:`TextSplitter` 手写切块(本周核心,不许用现成的)
+- [x] **Day 3**:PDF 支持(Apache Tika)+ 元数据完善
 - [ ] **Day 4**:Embedding + SimpleVectorStore 入库 + `IngestCommand`
 - [ ] **Day 5**:摄入流水线测试 + README + 思考题假设归档
 
@@ -3387,7 +3387,7 @@ public class TextSplitter {
 - [x] 改坏步进能变红(验证测试有效)
 - [x] 思考题假设写进 `notes/chunking-hypothesis.md`(有具体假设和验证指标,不是「到时候再看」)
 - [x] 合上文档,能在 25 分钟内重写出「分节 → 滑窗 → 打元数据」主流程
-- [x] git 提交:`git add -A && git commit -m "W5D2: TextSplitter 手写切块 + 单测"`
+- [x] git 提交:`git add -A && git commit -m "w"`
 
 ---
 
@@ -3463,11 +3463,11 @@ private Document loadPdf(Path path) throws IOException {
 
 **Day 3 打卡项**:
 
-- [ ] `loadAll()` 按扩展名分派:.md 直读 / .pdf 走 Tika / 其他跳过
-- [ ] 单篇失败不阻塞整批:坏 PDF/扫描件有 warn 日志,其余文档照常入库
-- [ ] 真实 PDF 验证过解析文本可读;扫描件(或空文本)验证过被优雅跳过
-- [ ] PDF 的 heading 兜底决策落地并写了注释
-- [ ] git 提交:`git add -A && git commit -m "W5D3: PDF 支持(Tika)+ 元数据完善"`
+- [x] `loadAll()` 按扩展名分派:.md 直读 / .pdf 走 Tika / 其他跳过
+- [x] 单篇失败不阻塞整批:坏 PDF/扫描件有 warn 日志,其余文档照常入库
+- [x] 真实 PDF 验证过解析文本可读;扫描件(或空文本)验证过被优雅跳过
+- [x] PDF 的 heading 兜底决策落地并写了注释
+- [x] git 提交:`git add -A && git commit -m "W5D3: PDF 支持(Tika)+ 元数据完善"`
 
 ---
 

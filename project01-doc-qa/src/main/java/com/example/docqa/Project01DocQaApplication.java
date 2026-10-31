@@ -2,6 +2,8 @@ package com.example.docqa;
 
 import com.example.docqa.ingest.Document;
 import com.example.docqa.ingest.DocumentLoader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -12,6 +14,8 @@ import java.util.List;
 
 @SpringBootApplication
 public class Project01DocQaApplication {
+
+	private static final Logger log = LoggerFactory.getLogger(Project01DocQaApplication.class);
 
 	public static void main(String[] args) {
 		SpringApplication.run(Project01DocQaApplication.class, args);
@@ -26,9 +30,9 @@ public class Project01DocQaApplication {
 	CommandLineRunner verifyLoad(DocumentLoader loader) {
 		return args -> {
 			List<Document> docs = loader.loadAll();
-			System.out.println("加载 " + docs.size() + " 篇");
+			log.info("Loaded {} documents", docs.size());
 			for (Document doc : docs) {
-				System.out.println("  " + doc.source() + " (" + doc.content().length() + " 字)");
+				log.info("  {} ({}字): {}", doc.source(), doc.content().length(), doc.content().substring(0, 100));
 			}
 		};
 	}
