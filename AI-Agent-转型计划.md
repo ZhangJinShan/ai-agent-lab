@@ -3697,10 +3697,10 @@ CommandLineRunner verifyLoad(DocumentLoader loader, TextSplitter splitter,
 
 **DocumentLoaderTest**(`@TempDir`,四个用例):
 
-- [ ] 递归:子目录里的 .md 也被读到
-- [ ] 过滤:.txt/.DS_Store 被跳过
-- [ ] UTF-8:写入中文内容,读回一致
-- [ ] 空目录/不存在目录:行为符合你 Day 1 的注释选择
+- [x] 递归:子目录里的 .md 也被读到
+- [x] 过滤:.txt/.DS_Store 被跳过
+- [x] UTF-8:写入中文内容,读回一致
+- [x] 空目录/不存在目录:行为符合你 Day 1 的注释选择
 
 **IngestPipelineTest(Fake EmbeddingModel 版)**:
 
@@ -3740,22 +3740,22 @@ project01 的 README(单模块 README,不是仓库根):
 
 #### 5.4 思考题归档 + 周自检(25 分钟)
 
-- [ ] `notes/chunking-hypothesis.md` 定稿:假设具体、验证指标明确(第 8 周的三个指标里用哪个)、对比变量写清(400/800/1200?)
-- [ ] **周自检(诚实回答)**:
-  - [ ] 合上文档,「分节 → 滑窗 → 打元数据」能徒手写出来?
-  - [ ] 切块的三个 trade-off 能脱口而出?800/100 的选择理由能讲清?
-  - [ ] 摄入流水线四环能画出来,每环的输入输出是什么?
-  - [ ] 这周有没有哪段核心代码(尤其 TextSplitter)是复制粘贴的?有就删掉重写
-- [ ] 进度日志:附录 C 填 W5 一行
+- [x] `notes/chunking-hypothesis.md` 定稿:假设具体、验证指标明确(第 8 周的三个指标里用哪个)、对比变量写清(400/800/1200?)
+- [x] **周自检(诚实回答)**:
+  - [x] 合上文档,「分节 → 滑窗 → 打元数据」能徒手写出来?
+  - [x] 切块的三个 trade-off 能脱口而出?800/100 的选择理由能讲清?
+  - [x] 摄入流水线四环能画出来,每环的输入输出是什么?
+  - [x] 这周有没有哪段核心代码(尤其 TextSplitter)是复制粘贴的?有就删掉重写
+- [x] 进度日志:附录 C 填 W5 一行
 - [ ] git 提交:`git add -A && git commit -m "W5D5: 摄入流水线测试 + README + 周自检"`
 
 **Day 5 打卡项**:
 
-- [ ] DocumentLoaderTest(4 个)+ IngestPipelineTest(Fake EmbeddingModel)全绿
-- [ ] 改坏步进有测试变红(验证测试有效)
-- [ ] README 按 5.3 骨架写完(含 embedding 维度和切块 TODO)
-- [ ] 思考题假设定稿归档
-- [ ] 周自检 4 条诚实过关
+- [x] DocumentLoaderTest(4 个)+ IngestPipelineTest(Fake EmbeddingModel)全绿
+- [x] 改坏步进有测试变红(验证测试有效)
+- [x] README 按 5.3 骨架写完(含 embedding 维度和切块 TODO)
+- [x] 思考题假设定稿归档
+- [x] 周自检 4 条诚实过关
 
 ### **
 
@@ -3895,6 +3895,6 @@ get_ticket_detail(ticketId)                → 工单详情
 | W2 | lab02:tool use 核心循环 + 手写递归下降计算器 + 对抗测试 + 消息流转图 | function.arguments 是字符串不是对象;tools 拼接无从下手 | Agent = while 循环 + 一份变长的消息列表 |
 | W3 | lab03:AgentConfig / 滑动窗口记忆 / 多轮 REPL + temperature 实验 | tool 消息键名写成 tool_id;system 消息每轮重复堆积 | 上下文工程第一课:记忆不是越多越好 |
 | W4 | 工程化:traceId 日志、Token 算钱、指数退避重试、三级超时体系,22 单测全绿 | isRetryable 默认不认 RuntimeException;mvn test 假绿(surefire 太老,Tests run: 0) | 生产护甲全是后端基本功的平移 |
-| W5 |         |      |           |
+| W5 | project01:摄入流水线——DocumentLoader(.md/.pdf+Tika)+ 手写 TextSplitter(800/100)+ Embedding 入库 + 10 单测离线全绿 | tika 聚合包缺 tika-core;@SpringBootTest 误跑 CommandLineRunner 真调 API;Document 包名撞车 | 切块是检索质量的天花板;假向量测管线,真质量留给评估 |
 ...（每周日填写,16 周后这就是你的转行叙事素材）
 ```

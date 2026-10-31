@@ -340,9 +340,42 @@ FakeLlmServer 补了三个流式剧本:`TRIGGER_SLOW_STREAM`(先吐字再沉默)
 **换模型注意事项**:换 embedding 模型 = 换向量维度,旧向量全部作废必须重建索引——
 SimpleVectorStore 每次摄入全量重建,天然免疫这个问题;换 Milvus/PGVector 后要注意。
 
+## 摄入流水线(第 5 周:文档摄入流水线)
+
+```
+docs/ 目录(.md/.pdf,3 篇模拟团队文档)
+   │ ① DocumentLoader   .md 直读 / .pdf 走 Tika;单篇失败 warn+跳过,不阻塞整批
+   ▼ List<Document>
+   │ ② TextSplitter     手写:按标题分节 → 长节滑窗(800/100)→ 打元数据
+   ▼ List<Chunk>(source / heading / chunkIndex / text)
+   │ ③ Embedding        qwen3.7-text-embedding-flash → 1024 维向量
+   ▼
+   │ ④ SimpleVectorStore 入库(内存,重启即失 → 摄入可重跑,全量重建)
+   ▼
+   可检索的知识库(冒烟:查「限流」→ 命中「登录接口」块)
+```
+
+## 我实现了什么(摄入链路)
+
+- **DocumentLoader**:.md 直读 + .pdf(Tika 抽文字 + `# 文件名` 标题兜底),加密/损坏/扫描件优雅跳过
+- **TextSplitter**(手写,核心链路):「分节 → 滑窗 → 元数据」;heading 取最近标题行,前言为 `""`
+- **IngestCommand**:加载 N 篇 → 切出 M 块 → 入库,冒烟检索验证「查得到」
+- **测试 10 个全绿**:DocumentLoaderTest(5, @TempDir 离线)+ TextSplitterTest(4)+ IngestPipelineTest(1,FakeEmbeddingModel 假向量串全链路)
+
+## 切块策略
+
+- **800 字上限 / 100 字重叠**:检索粒度 vs 上下文完整性的折中;重叠让答案跨块边界时两边留线索
+- 两个 TODO(第 9 周优化实验的候选变量):① 代码块保护(markdown 语法会被切在中间)② token 级切块(今天按字符,中文 1 字 ≈ 1 token)
+- 思考题假设(第 9 周用评估回答):[project01-doc-qa/notes/chunking-hypothesis.md](project01-doc-qa/notes/chunking-hypothesis.md)
+
+## 踩坑记录(第 5 周)
+
+1. **「找不到符号:类 Tika」有三种可能**:没 import / 依赖没引 / `tika-parsers-standard-package` 聚合包没把 `tika-core` 传递进来(显式补依赖解决)——对照「程序包 org.apache.tika 不存在」是另一种错
+2. **`Document` 包名撞车**:`ingest.Document` 和 Spring AI 的 `org.springframework.ai.document.Document` 同名,一方 import、另一方全限定,没第三条路
+3. **`@SpringBootTest` 会执行 CommandLineRunner**:自带的 contextLoads 把摄入真跑了一遍,拿默认 key 调真 API 吃 401——单测必须离线(FakeEmbeddingModel),命令式逻辑要条件装配
+4. **Tika 按内容嗅探格式**:纯文本改名 .pdf 会被当 text/plain 成功解析;造「坏 PDF」测试要用空文件或真损坏文件
+5. **Spring AI 2.x 配置迁移**:`*.options.model` 已过期 → `chat.model` / `embedding.model`;IDEA 划删除线时,去 jar 里的 `spring-configuration-metadata.json` 找官方替代,比搜博客准
+
 ## 待补全(随项目进度)
 
-- 摄入流水线(加载 → 切块 → 向量化 → 入库 四环图)
-- 切块策略(800/100 + 两个 TODO:代码块保护、token 级切块)
-- 踩坑记录 / 思考题假设(→ notes/chunking-hypothesis.md)
 - 手写 vs Spring AI 对照表(第 7 周)
