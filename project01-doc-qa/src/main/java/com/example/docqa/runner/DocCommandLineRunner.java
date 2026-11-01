@@ -13,6 +13,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -37,17 +38,20 @@ public class DocCommandLineRunner implements CommandLineRunner {
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
     private final ChatClient chatClient;
+    private final double minScore;
 
     public DocCommandLineRunner(DocumentLoader loader,
                                 TextSplitter textSplitter,
                                 EmbeddingModel embeddingModel,
                                 VectorStore vectorStore,
-                                ChatClient chatClient) {
+                                ChatClient chatClient,
+                                @Value("${docqa.retrieval.min-score:0.3}") double minScore) {
         this.loader = loader;
         this.textSplitter = textSplitter;
         this.embeddingModel = embeddingModel;
         this.vectorStore = vectorStore;
         this.chatClient = chatClient;
+        this.minScore = minScore;
     }
 
     @Override
@@ -89,8 +93,8 @@ public class DocCommandLineRunner implements CommandLineRunner {
 
         // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
         Retriever retriever = new Retriever(vectorStore);
-        AnswerService answerService = new AnswerService(retriever, chatClient);
-        List<String> questions = List.of("登录接口的限流是多少？", "怎么处理磁盘水位告警?", "服务支持灰度发布吗?", "明天天气怎么样?");
+        AnswerService answerService = new AnswerService(retriever, chatClient, minScore);
+        List<String> questions = List.of("登录接口的限流是多少？", "服务支持灰度发布吗?", "max-active 最大能配多少?", "明天天气怎么样?");
         for (String question : questions) {
             String answer = answerService.answer(question);
             log.info("{} → 回答是: {}", question, answer);

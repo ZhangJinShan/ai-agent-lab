@@ -21,15 +21,20 @@ public class AnswerService {
 
     private final ChatClient chatClient;
 
-    public AnswerService(Retriever retriever, ChatClient chatClient) {
+    private final double minScore;
+
+    public AnswerService(Retriever retriever, ChatClient chatClient, double minScore) {
         this.retriever = retriever;
         this.chatClient = chatClient;
+        this.minScore = minScore;
     }
 
     public String answer(String question) {
         // 1. 检索 top-5
         List<RetrievedChunk> chunks = retriever.retrieve(question);
-        if (chunks.isEmpty()) {
+        if (chunks.isEmpty() || chunks.get(0).score() < this.minScore) {
+            double top1 = chunks.isEmpty() ? 0.0 : chunks.get(0).score();
+            logger.info("拒答: question={}, top_1.score={}", question, top1);
             return "文档中没有相关内容";
         }
         // 2. 拼 fragments → 每块格式[来源: {source}#{heading}]\n{text}\n\n
