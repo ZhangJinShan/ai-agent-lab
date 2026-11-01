@@ -36,7 +36,6 @@ public class AnswerService {
         String fragments = buildFragments(chunks);
         // 3. 把 fragments + question 填进回答模板
         String prompt = buildPrompt(fragments, question);
-        logger.info("prompt={}", prompt);
         // 4. 调 chat, 拿回文本
         return chatClient.prompt()
                 .user(prompt)

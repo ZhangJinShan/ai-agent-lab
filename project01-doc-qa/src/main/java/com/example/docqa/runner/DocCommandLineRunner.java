@@ -58,8 +58,6 @@ public class DocCommandLineRunner implements CommandLineRunner {
         // 切割文档
         List<Chunk> chunks = new ArrayList<>();
         for (Document doc : docs) {
-            int previewLen = Math.min(doc.content().length(), 100);
-            log.info("  {} ({}字): {}", doc.source(), doc.content().length(), doc.content().substring(0, previewLen));
             List<Chunk> childChunks = textSplitter.split(doc);
             if (!childChunks.isEmpty()) {
                 chunks.addAll(childChunks);
@@ -92,7 +90,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
         // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
         Retriever retriever = new Retriever(vectorStore);
         AnswerService answerService = new AnswerService(retriever, chatClient);
-        List<String> questions = List.of("登录接口的限流是多少？", "怎么处理磁盘水位告警?", "明天天气怎么样?");
+        List<String> questions = List.of("登录接口的限流是多少？", "怎么处理磁盘水位告警?", "服务支持灰度发布吗?", "明天天气怎么样?");
         for (String question : questions) {
             String answer = answerService.answer(question);
             log.info("{} → 回答是: {}", question, answer);
