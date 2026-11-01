@@ -4,9 +4,12 @@ import com.example.docqa.ingest.Chunk;
 import com.example.docqa.ingest.Document;
 import com.example.docqa.ingest.DocumentLoader;
 import com.example.docqa.ingest.TextSplitter;
+import com.example.docqa.qa.AnswerService;
+import com.example.docqa.retriever.Retriever;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -33,15 +36,18 @@ public class DocCommandLineRunner implements CommandLineRunner {
     private final TextSplitter textSplitter;
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
+    private final ChatClient chatClient;
 
     public DocCommandLineRunner(DocumentLoader loader,
                                 TextSplitter textSplitter,
                                 EmbeddingModel embeddingModel,
-                                VectorStore vectorStore) {
+                                VectorStore vectorStore,
+                                ChatClient chatClient) {
         this.loader = loader;
         this.textSplitter = textSplitter;
         this.embeddingModel = embeddingModel;
         this.vectorStore = vectorStore;
+        this.chatClient = chatClient;
     }
 
     @Override
@@ -81,6 +87,15 @@ public class DocCommandLineRunner implements CommandLineRunner {
             }
             log.info("[命中] {}#{}: {}", r.getMetadata().get("source"),
                     r.getMetadata().get("heading"), text.substring(0, 40));
+        }
+
+        // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
+        Retriever retriever = new Retriever(vectorStore);
+        AnswerService answerService = new AnswerService(retriever, chatClient);
+        List<String> questions = List.of("登录接口的限流是多少？", "怎么处理磁盘水位告警?", "明天天气怎么样?");
+        for (String question : questions) {
+            String answer = answerService.answer(question);
+            log.info("{} → 回答是: {}", question, answer);
         }
     }
 

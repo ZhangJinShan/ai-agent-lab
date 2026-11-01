@@ -2,6 +2,8 @@ package com.example.docqa.config;
 
 import com.example.docqa.ingest.DocumentLoader;
 import com.example.docqa.ingest.TextSplitter;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -30,5 +32,10 @@ public class DocQaConfig {
 	@Bean
 	VectorStore vectorStore(EmbeddingModel embeddingModel) {
 		return SimpleVectorStore.builder(embeddingModel).build();
+	}
+
+	@Bean
+	ChatClient chatClient(ChatModel chatModel) {
+		return ChatClient.builder(chatModel).build();
 	}
 }
