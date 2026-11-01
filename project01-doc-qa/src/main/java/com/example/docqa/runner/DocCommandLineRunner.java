@@ -11,6 +11,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import java.util.Map;
  * @description: 文档加载、切割、向量化、存储 CommanLineRunner
  * @create: 2026/11/1
  **/
+@ConditionalOnProperty(name = "docqa.runner.enabled", havingValue = "true", matchIfMissing = true)
 @Component
 public class DocCommandLineRunner implements CommandLineRunner {
 
