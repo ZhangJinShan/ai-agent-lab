@@ -1,0 +1,18 @@
+{"id": 1, "question": "登录接口的限流是多少?", "expected": "应引用 接口文档.md#登录接口,提到 100 次/分钟", "type": "factual"}
+{"id": 2, "question": "密码连续错几次会锁定?锁定多久?", "expected": "应引用 接口文档.md#登录接口(注意事项)或 配置说明.md#缓存策略,提到连续 5 次锁定 30 分钟", "type": "factual"}
+{"id": 3, "question": "修改密码有频率限制吗?", "expected": "应引用 接口文档.md#修改密码接口 或 配置说明.md#接口限流配置,提到单用户 5 次/小时", "type": "factual"}
+{"id": 4, "question": "read-timeout 的默认值是多少?", "expected": "应引用 配置说明.md#超时配置,提到默认 30 秒(可调 5s~300s)", "type": "factual"}
+{"id": 5, "question": "Redis 连接池 max-active 的默认值是多少?", "expected": "应引用 配置说明.md#Redis 连接池,提到默认 50", "type": "factual"}
+{"id": 6, "question": "服务支持灰度发布吗?", "expected": "文档中无灰度发布相关内容,应回答「文档中没有相关内容」", "type": "abstain"}
+{"id": 7, "question": "max-active 最大能配到多少?", "expected": "文档只说明调大前需确认 Redis 实例 maxclients 余量,未给明确上限数值,应回答「文档中没有相关内容」", "type": "abstain"}
+{"id": 8, "question": "明天的天气怎么样?", "expected": "与文档无关,应回答「文档中没有相关内容」", "type": "abstain"}
+{"id": 9, "question": "如何把超时时间改成 1 小时?", "expected": "纠错:指出文档中 read-timeout 上限是 300 秒,不存在 1 小时的说法,引用 配置说明.md#超时配置", "type": "trap"}
+{"id": 10, "question": "登录接口支持 1000 次/分钟的限流吗?", "expected": "纠错:限流是 100 次/分钟而非 1000,引用 接口文档.md#登录接口", "type": "trap"}
+{"id": 11, "question": "短信验证码收不到时,可以引导用户用什么替代方案?", "expected": "应引用 故障手册.md#短信验证码收不到,提到引导用户使用「语音验证码」作为替代方案", "type": "factual"}
+{"id": 12, "question": "登录接口的限流能不能调大?", "expected": "文档未明确「能否调大」登录限流,只说明调整属对外行为变更需产品和安全双签、大促期网关会临时收紧;期望回答「文档中没有相关内容」而非瞎猜能或不能", "type": "abstain"}
+{"id": 13, "question": "数据库连接池 maximum-pool-size 能配到多少?", "expected": "文档只说默认 20、调大前需评估 MySQL max_connections 余量,未给明确上限数值,期望回答「文档中没有相关内容」", "type": "abstain"}
+{"id": 14, "question": "服务支持暗黑模式或夜间模式吗?", "expected": "文档中无界面主题相关内容,与主题无关,应回答「文档中没有相关内容」", "type": "abstain"}
+{"id": 15, "question": "缓存 user-info 的 ttl 默认是 30 分钟吗?", "expected": "纠错:默认是 10 分钟而非 30 分钟,引用 配置说明.md#缓存策略(cache.user-info.ttl=10 分钟)", "type": "trap"}
+{"id": 16, "question": "把 read-timeout 调到 10 分钟可以吗?", "expected": "纠错:read-timeout 上限是 300 秒(即 5 分钟),10 分钟超出可调范围,文档明确不建议调到范围之外,引用 配置说明.md#超时配置", "type": "trap"}
+{"id": 17, "question": "密码连续错 3 次会锁定账号吗?", "expected": "纠错:是连续 5 次(非 3 次)锁定 30 分钟,与接口文档一致,引用 配置说明.md#缓存策略 或 接口文档.md#登录接口", "type": "trap"}
+{"id": 18, "question": "Redis 连接池 max-active 默认是 100 吗?", "expected": "纠错:默认是 50 而非 100,引用 配置说明.md#Redis 连接池", "type": "trap"}

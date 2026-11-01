@@ -325,7 +325,7 @@ FakeLlmServer 补了三个流式剧本:`TRIGGER_SLOW_STREAM`(先吐字再沉默)
 
 # project01-doc-qa — 团队文档问答 Agent(第二阶段 · 进行中)
 
-> 状态:第 5 周(文档摄入流水线)建设中,本节先落硬数据,随进度补全。
+> 状态:第 6 周(检索 + 带引用的回答)已完成;评估体系第 8 周补齐,本节随进度补全。
 
 ## Embedding(模型名 / 向量维度 / 供应商)
 
@@ -375,6 +375,40 @@ docs/ 目录(.md/.pdf,3 篇模拟团队文档)
 3. **`@SpringBootTest` 会执行 CommandLineRunner**:自带的 contextLoads 把摄入真跑了一遍,拿默认 key 调真 API 吃 401——单测必须离线(FakeEmbeddingModel),命令式逻辑要条件装配
 4. **Tika 按内容嗅探格式**:纯文本改名 .pdf 会被当 text/plain 成功解析;造「坏 PDF」测试要用空文件或真损坏文件
 5. **Spring AI 2.x 配置迁移**:`*.options.model` 已过期 → `chat.model` / `embedding.model`;IDEA 划删除线时,去 jar 里的 `spring-configuration-metadata.json` 找官方替代,比搜博客准
+
+## 检索 + 回答链路(第 6 周)
+
+```
+问题 → Retriever(按 score 降序取 top-5,带 source/heading/score)
+   │  top-1.score < 0.3 ?  → 是:直接 return "文档中没有相关内容"(不调模型,省成本 + 防幻觉第二闸)
+   ▼ 否
+拼 fragments:每块 → 【来源:文件名#标题】\n正文(按 score 降序)
+   │
+填模板:system = "仅根据以下文档片段回答 + 每句标 [来源] + 没有就答文档中没有相关内容"
+   │        (grounding 防幻觉第一闸)
+   ▼
+ChatClient(glm-5.3) → 带 [来源:xxx#yyy] 引用的回答
+```
+
+- **Retriever**(Day 1,核心链路手写):问题 → top-k 带分数的块;`Document.getScore()` 拿相似度,`String.valueOf(metadata.get(...))` 取出处。
+- **拒答**(Day 3):`min-score=0.3` 在检索层确定性拦截,比靠模型「觉得」没依据可靠,且省一次 chat 调用。
+- **AnswerService**(Day 2):检索 → 拼引用片段 → 填 grounding 模板 → ChatClient;引用标注让答案可验证,grounding 让模型不脱离文档。
+
+## 分数观测表(Day 1 抄的三组,0.3 阈值的依据)
+
+| 问题 | top-1 出处 | 最高分 | 说明 |
+| --- | --- | --- | --- |
+| 登录接口的限流是多少 | 接口文档.md#登录接口 | 0.65 | 有答案,0.7+ 量级 |
+| 怎么处理磁盘水位告警 | 故障手册.md | 0.68 | 有答案,0.7+ 量级 |
+| 明天天气怎么样(库里没有) | — | 0.3 | 无答案,< 0.4 量级 |
+
+**阈值 0.3 怎么来的**:拍的,依据是上面「有答案 0.7+ / 无答案 < 0.4」,取中间偏保守。诚实标注「先拍个数,第 9 周用评估校准」。
+
+## 踩坑记录(第 6 周,挑 3 条最痛的)
+
+1. **`getScore()` 返回 `Double` 可能为 null**:不同 VectorStore 实现行为不一,直接 `.score()` 拆箱会 NPE;统一判空兜底 `0.0` + warn,否则 Day 3 拒答判断直接崩。
+2. **拒答文案必须全链路一字不差**:AnswerService 拒答分支返回「文档中没有相关内容」,和 prompt 模板里「没有就答文档中没有相关内容」的约定必须对上,否则模型可能自己编一句拒答把 grounding 绕过去。
+3. **引用标注 `[来源:文件名#]` 光秃秃**:前言小节 / 单块文档 heading 用空串时拼出来的引用没有标题;PDF 用文件名兜底、MD 前言块也用文件名兜底才好看(第 5 周留的债第 6 周还)。
 
 ## 待补全(随项目进度)
 

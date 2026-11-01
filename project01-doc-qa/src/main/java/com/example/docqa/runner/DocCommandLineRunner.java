@@ -5,6 +5,7 @@ import com.example.docqa.ingest.Document;
 import com.example.docqa.ingest.DocumentLoader;
 import com.example.docqa.ingest.TextSplitter;
 import com.example.docqa.qa.AnswerService;
+import com.example.docqa.qa.ChatClientAnswerGenerator;
 import com.example.docqa.retriever.Retriever;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -93,8 +94,19 @@ public class DocCommandLineRunner implements CommandLineRunner {
 
         // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
         Retriever retriever = new Retriever(vectorStore);
-        AnswerService answerService = new AnswerService(retriever, chatClient, minScore);
-        List<String> questions = List.of("登录接口的限流是多少？", "服务支持灰度发布吗?", "max-active 最大能配多少?", "明天天气怎么样?");
+        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore);
+        List<String> questions = List.of(
+                "登录接口的限流是多少？",
+                "密码连续错几次会锁定?锁定多久?",
+                "修改密码有频率限制吗?",
+                "read-timeout 的默认值是多少?",
+                "Redis 连接池 max-active 的默认值是多少?",
+                "服务支持灰度发布吗?",
+                "max-active 最大能配到多少?",
+                "明天的天气怎么样?",
+                "如何把超时时间改成 1 小时?",
+                "登录接口支持 1000 次/分钟的限流吗?"
+        );
         for (String question : questions) {
             String answer = answerService.answer(question);
             log.info("{} → 回答是: {}", question, answer);

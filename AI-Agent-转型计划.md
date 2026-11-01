@@ -4184,10 +4184,10 @@ public String answer(String question) {
 
 **Day 4 打卡项**:
 
-- [ ] `FakeRetriever` + `AnswerServiceTest` 八用例全绿(5 答 + 3 拒,拒答断言含「chat 零调用」)
-- [ ] `eval/dataset.jsonl` 按第 8 周格式打样 ≥8 题(factual/abstain/trap 三类齐)
-- [ ] 手动验收表(题 → top-1 → score → 行为)记录归档
-- [ ] git 提交:`git add -A && git commit -m "W6D4: 知道/不知道双路径测试 + eval 题单打样"`
+- [x] `FakeRetriever` + `AnswerServiceTest` 八用例全绿(5 答 + 3 拒,拒答断言含「chat 零调用」)
+- [x] `eval/dataset.jsonl` 按第 8 周格式打样 ≥8 题(factual/abstain/trap 三类齐)
+- [x] 手动验收表(题 → top-1 → score → 行为)记录归档
+- [x] git 提交:`git add -A && git commit -m "W6D4: 知道/不知道双路径测试 + eval 题单打样"`
 
 ---
 
@@ -4216,21 +4216,21 @@ public String answer(String question) {
 
 #### 5.3 周自检(20 分钟,诚实回答)
 
-- [ ] 合上文档,能重写「检索 → 拒答判断 → 拼 fragments → 填模板 → 调 chat」主链路?
-- [ ] 「分数」的作用(排序 + 拒答依据)和 0.3 的来历,能脱口而出?
-- [ ] grounding 和引用标注,哪条管防幻觉、哪条管可验证,能分开讲清?
-- [ ] 这周有没有复制粘贴的核心代码(尤其 AnswerService 的拼装)?有就删掉重写
+- [x] 合上文档,能重写「检索 → 拒答判断 → 拼 fragments → 填模板 → 调 chat」主链路?
+- [x] 「分数」的作用(排序 + 拒答依据)和 0.3 的来历,能脱口而出?
+- [x] grounding 和引用标注,哪条管防幻觉、哪条管可验证,能分开讲清?
+- [x] 这周有没有复制粘贴的核心代码(尤其 AnswerService 的拼装)?有就删掉重写
 
 #### 5.4 收尾
 
-- [ ] 进度日志:附录 C 填 W6 一行
-- [ ] git 提交:`git add -A && git commit -m "W6D5: README + 评估出题预热 + 周自检"`
+- [x] 进度日志:附录 C 填 W6 一行
+- [x] git 提交:`git add -A && git commit -m "W6D5: README + 评估出题预热 + 周自检"`
 
 **Day 5 打卡项**:
 
-- [ ] README 检索/回答/拒答增量写完(含分数观测表)
-- [ ] `eval/dataset.jsonl` 扩到 ≥15 题,三类配比齐、expected 可判分
-- [ ] 周自检 4 条诚实过关
+- [x] README 检索/回答/拒答增量写完(含分数观测表)
+- [x] `eval/dataset.jsonl` 扩到 ≥15 题,三类配比齐、expected 可判分
+- [x] 周自检 4 条诚实过关
 
 ---
 

@@ -19,22 +19,26 @@ public class AnswerService {
 
     private final Retriever retriever;
 
-    private final ChatClient chatClient;
+    private final AnswerGenerator answerGenerator;
 
     private final double minScore;
 
-    public AnswerService(Retriever retriever, ChatClient chatClient, double minScore) {
+    public AnswerService(Retriever retriever, AnswerGenerator answerGenerator, double minScore) {
         this.retriever = retriever;
-        this.chatClient = chatClient;
+        this.answerGenerator = answerGenerator;
         this.minScore = minScore;
     }
 
     public String answer(String question) {
         // 1. 检索 top-5
         List<RetrievedChunk> chunks = retriever.retrieve(question);
-        if (chunks.isEmpty() || chunks.get(0).score() < this.minScore) {
-            double top1 = chunks.isEmpty() ? 0.0 : chunks.get(0).score();
-            logger.info("拒答: question={}, top_1.score={}", question, top1);
+        if (chunks.isEmpty()) {
+            logger.info("No chunks found for question {}", question);
+            return "文档中没有相关内容";
+        }
+        logger.info("question={}, top_1.source={}, top_1.score={}", question, chunks.get(0).source() + "#" + chunks.get(0).heading(), chunks.get(0).score());
+        if (chunks.get(0).score() < this.minScore) {
+            logger.info("拒答: question={}, top_1.score={}", question, chunks.get(0).score());
             return "文档中没有相关内容";
         }
         // 2. 拼 fragments → 每块格式[来源: {source}#{heading}]\n{text}\n\n
@@ -42,10 +46,7 @@ public class AnswerService {
         // 3. 把 fragments + question 填进回答模板
         String prompt = buildPrompt(fragments, question);
         // 4. 调 chat, 拿回文本
-        return chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
+        return answerGenerator.generate(prompt);
     }
 
     private String buildFragments(List<RetrievedChunk> chunks) {
