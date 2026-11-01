@@ -3089,8 +3089,8 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
 - [x] **Day 1**:project01 工程骨架 + 测试文档集 + `DocumentLoader`(读 .md)
 - [x] **Day 2**:`TextSplitter` 手写切块(本周核心,不许用现成的)
 - [x] **Day 3**:PDF 支持(Apache Tika)+ 元数据完善
-- [ ] **Day 4**:Embedding + SimpleVectorStore 入库 + `IngestCommand`
-- [ ] **Day 5**:摄入流水线测试 + README + 思考题假设归档
+- [x] **Day 4**:Embedding + SimpleVectorStore 入库 + `IngestCommand`
+- [x] **Day 5**:摄入流水线测试 + README + 思考题假设归档
 
 **本周工程结构**(Day 1 建):
 
@@ -3149,35 +3149,74 @@ List<Chunk>
 
 ```xml
 <parent>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.x</version>  <!-- 选 Initializr 当前稳定版(2026 年已是 4.x);Spring Boot 4 基线 JDK 17,你机器上的 17 直接能用 -->
-</parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.9</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
 
-<dependencies>
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter</artifactId>
-    </dependency>
-    <!-- Spring AI:Day 4 起用(Embedding/VectorStore),今天先引好。
+	<groupId>com.example</groupId>
+	<artifactId>project01-doc-qa</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>project01-doc-qa</name>
+	<description>project01-doc-qa</description>
+
+	<properties>
+		<java.version>17</java.version>
+		<maven.compiler.source>17</maven.compiler.source>
+		<maven.compiler.target>17</maven.compiler.target>
+		<maven.compiler.release>17</maven.compiler.release>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+	</properties>
+	<dependencyManagement>
+		<dependencies>
+			<!-- Spring AI 版本统一由 BOM 管理:Spring AI 2.x 对应 Spring Boot 4.x -->
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-bom</artifactId>
+				<version>2.0.2</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter</artifactId>
+		</dependency>
+
+		<!-- Spring AI:Day 4 起用(Embedding/VectorStore),今天先引好。
          OpenAI 兼容协议 = 你现有的 key 和 MaaS 端点直接能用 -->
-    <dependency>
-        <groupId>org.springframework.ai</groupId>
-        <artifactId>spring-ai-starter-model-openai</artifactId>
-        <!-- 版本由 spring-ai-bom 统一管理 -->
-    </dependency>
-    <!-- PDF 解析:Day 3 用 -->
-    <dependency>
-        <groupId>org.apache.tika</groupId>
-        <artifactId>tika-parsers-standard-package</artifactId>
-        <version>2.9.x</version>
-    </dependency>
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-</dependencies>
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-openai</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-vector-store</artifactId>
+		</dependency>
+
+		<!-- PDF 解析:Day 3 用 -->
+		<dependency>
+			<groupId>org.apache.tika</groupId>
+			<artifactId>tika-core</artifactId>
+			<version>3.2.3</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.tika</groupId>
+			<artifactId>tika-parsers-standard-package</artifactId>
+			<version>3.2.3</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
 ```
 
 > 为什么这次引框架了?第二阶段的主线是「用 Spring AI 做出项目」——你已经用 4 周证明自己能裸写,现在框架是工具不是拐杖。对照 lab03 的抽象看 Spring AI 的每个类,这是本阶段的学习姿势。
@@ -3747,7 +3786,7 @@ project01 的 README(单模块 README,不是仓库根):
   - [x] 摄入流水线四环能画出来,每环的输入输出是什么?
   - [x] 这周有没有哪段核心代码(尤其 TextSplitter)是复制粘贴的?有就删掉重写
 - [x] 进度日志:附录 C 填 W5 一行
-- [ ] git 提交:`git add -A && git commit -m "W5D5: 摄入流水线测试 + README + 周自检"`
+- [x] git 提交:`git add -A && git commit -m "W5D5: 摄入流水线测试 + README + 周自检"`
 
 **Day 5 打卡项**:
 
@@ -3757,9 +3796,250 @@ project01 的 README(单模块 README,不是仓库根):
 - [x] 思考题假设定稿归档
 - [x] 周自检 4 条诚实过关
 
-### **
+---
+
+## 第 6 周:检索 + 带引用的回答(项目一 · doc-qa)
+
+**本周成果**:输入一个问题,系统从知识库里检索出相关块,**用模型生成带 [来源] 引用标注的回答**;文档里没有的信息回答「文档中没有相关内容」——可验证、不编造的问答,这是 RAG 的灵魂。
+
+### 今天要干什么(每天约 2 小时,共 5 天)
+
+- [ ] **Day 1**:Retriever —— 检索封装(带分数和元数据)+ 应用形态改造
+- [ ] **Day 2**:带引用的回答 —— 回答模板 + ChatClient(prompt 工程第一课)
+- [ ] **Day 3**:「不知道」路径 —— 分数阈值拒答
+- [ ] **Day 4**:测试 —— 5 个「有答案」+ 3 个「幻觉诱导」
+- [ ] **Day 5**:README + 周自检 + 为第 8 周评估出题
+
+**本周工程结构增量**(Day 1 建):
+
+```
+project01-doc-qa/src/main/java/com/example/docqa/
+├── ingest/                          ← 第 5 周的(不动)
+├── retriever/
+│   ├── RetrievedChunk.java          ← Day 1:检索结果(text/source/heading/score)
+│   └── Retriever.java               ← Day 1:问题 → top-k 带分数的块(核心链路,手敲)
+└── qa/
+    └── AnswerService.java           ← Day 2:检索 → 拼引用片段 → 调 chat → 带引用回答
+```
+
+> **铁律提醒**:检索是三大核心链路之一(切块/检索/评估)——`Retriever` 和回答拼装逻辑必须手写。好消息是分数 API 已探明(Spring AI 2.0.2 实测):`Document.getScore()` 拿相似度分数、`SearchRequest.builder().similarityThreshold(double)` 可做阈值过滤。
 
 ---
+
+### Day 1:Retriever —— 检索封装(约 2 小时)
+
+**把第 5 周的「冒烟查询」升级成正经的检索组件。** 目标:输入一个问题,返回 top-5 的 `RetrievedChunk`——每块带**文本、出处(source/heading)、相似度分数**;并且把应用形态改造成「摄入和问答在同一个进程里跑」。
+
+#### 1.1 先想清楚:检索的输入输出和「分数」
+
+```
+输入:一个问题(字符串)
+输出:List<RetrievedChunk>,按相似度从高到低排,最多 5 个
+每个 RetrievedChunk = (text, source, heading, score)
+```
+
+**score(相似度分数)** 是本周的新概念:问题和块各变成一个向量,两个向量夹角的余弦 = 语义相近程度,归一化后 **1.0 = 完全相关,0 = 不相关**。它有两个用途:
+
+1. **排序**:score 高的排前面,给模型的片段按相关性排序
+2. **拒答依据**(Day 3):top-1 的分数都低于阈值(如 0.3),说明知识库里压根没有相关内容——这时让模型回答就是逼它编
+
+> 一句话记住分数的意义:**「检索到了什么」和「检索到的靠不靠谱」是两回事**,没有分数你只能赌后者。
+
+#### 1.2 应用形态改造(30 分钟,今天最容易被忽略的一步)
+
+现状的坑:`SimpleVectorStore` 是内存库,**重启即失**;你的 `IngestCommand` 跑完进程就退出了——问答根本没机会发生。本周的目标形态:
+
+```
+启动 → 摄入一次(docs/ 全量重建进内存库)→ 反复接受提问(每次:检索 → 回答)
+```
+
+改造三件套:
+
+1. 把「加载+切割+入库」逻辑从 CommandLineRunner 里抽成 **`IngestService.ingest()`**(返回切了多少块)——Runner 只负责编排
+2. `VectorStore` bean 天然是单例:`IngestService` 往里灌,`Retriever` 从里查,同一个内存库
+3. CommandLineRunner 里先 `ingestService.ingest()`,然后跑 demo 问题(Day 2 接上回答后换正式提问;交互式 REPL 是 Day 4 之后的可选项,lab03 W3D4 的 Scanner 循环直接复用)
+
+#### 1.3 写 RetrievedChunk + Retriever(50 分钟)
+
+```java
+package com.example.docqa.retriever;
+
+/**
+ * 一个检索结果:块文本 + 可引用的出处 + 相似度分数。
+ * 刻意不暴露 Spring AI 的 Document —— 领域模型不泄框架类型,以后换库不用改业务代码。
+ */
+public record RetrievedChunk(String text, String source, String heading, double score) {}
+```
+
+`Retriever` 骨架(TODO 自己填):
+
+```java
+package com.example.docqa.retriever;
+
+import org.springframework.ai.vectorstore.*;
+
+import java.util.List;
+
+/**
+ * 检索器:问题 → top-k 带分数的块。核心链路,手写。
+ */
+public class Retriever {
+
+    private static final int TOP_K = 5;
+
+    private final VectorStore vectorStore;
+
+    public Retriever(VectorStore vectorStore) {
+        // TODO: 判空
+    }
+
+    /** 检索:返回按 score 降序的 top-k 块 */
+    public List<RetrievedChunk> retrieve(String question) {
+        // TODO 1: 判空 —— 问题为空抛 IllegalArgumentException(输入不可信,老规矩)
+        // TODO 2: SearchRequest.builder().query(question).topK(TOP_K).build()
+        //         (先不设 similarityThreshold —— 我们要看原始分数,阈值是 Day 3 的事)
+        // TODO 3: vectorStore.similaritySearch(request) → List<Document>
+        // TODO 4: 每个 Document 转 RetrievedChunk:
+        //           text   = doc.getText()
+        //           source = doc.getMetadata().get("source")   ← W5 埋的元数据今天收租
+        //           heading= doc.getMetadata().get("heading")
+        //           score  = doc.getScore()                     ← 分数!判空兜底 0.0 + warn
+        // TODO 5: 返回(检索结果已按相似度排序;不放心可再显式排一遍)
+    }
+}
+```
+
+两个防御点(把框架输出当不可信输入,第 N 次练习):① `getMetadata().get(...)` 取出来是 `Object`,要 `String.valueOf(...)`;② `getScore()` 返回 `Double` 可能为 null(不同 VectorStore 实现行为不一)——判空兜底。
+
+#### 1.4 验证(20 分钟):看分数的体感
+
+Demo 问题跑三组,**把分数抄下来**(Day 3 拍阈值就靠这组数):
+
+| 问题 | 预期 |
+|---|---|
+| 「登录接口的限流是多少」 | top-1 是 `接口文档.md#登录接口` 的块,score 明显高(0.7+ 量级) |
+| 「怎么处理磁盘水位告警」 | top-1 是 `故障手册.md` 对应块 |
+| 「明天天气怎么样」(库里没有的) | top-5 分数普遍低(< 0.4 量级)——**Day 3 拒答的体感依据** |
+
+#### 1.5 常见卡点
+
+| 现象 | 原因 / 解法 |
+|---|---|
+| 检索结果 score 全是 null | VectorStore 实现差异;先确认 `doc.getScore()`,真为 null 就 README 记「该实现不吐分数」,拒答改走 `similarityThreshold(0.3)` 参数路线 |
+| top-1 不是预期的块 | 先别怀疑向量:检查那块 text 是不是空的、元数据是不是没入库(W5 的 toSpringDoc 漏字段会在这里爆雷) |
+| 问「限流」命中高,问完整句子反而低 | 正常!query 措辞影响相似度——第 9 周要调的东西,今天记观察 |
+| 想现在就调 TOP_K/阈值 | 忍住,第 9 周有实验;今天先建立「看分数」的习惯 |
+
+**Day 1 打卡项**:
+
+- [ ] `RetrievedChunk` + `Retriever` 手写完成(领域模型不泄框架类型)
+- [ ] 应用形态改造:启动摄入一次 → 同进程可反复查询
+- [ ] 三组验证问题的分数记录在案(尤其「库里没有的问题」的分数区间)
+- [ ] git 提交:`git add -A && git commit -m "W6D1: Retriever 检索封装 + 分数观测"`
+
+---
+
+### Day 2:带引用的回答(约 2 小时,prompt 工程第一课)
+
+**今天让模型开口说话,而且说得有据可查。** 目标:问题 → 检索 top-5 → 拼进回答模板 → 调 glm-5.3 → 输出**每个论断都带 [来源] 引用**的回答。这是「RAG 的 A」(Generation)第一次上线。
+
+#### 2.1 先想清楚:为什么回答必须带引用(15 分钟)
+
+不带引用的问答是黑盒:答案对不对全靠用户信不信。带引用的回答**可验证**——用户(和第 8 周的评估器)能顺着 [来源:xx#yy] 回到原文核对。模板里两条铁律各管一件事:
+
+1. **grounding**(「仅根据以下片段回答」):不许用模型自己的知识补全——防幻觉的第一道闸
+2. **引用标注**(「每个论断后面标注引用」):可验证性的来源——第 8 周「引用准确率」指标的评估对象
+
+#### 2.2 回答模板(25 分钟,prompt 工程第一课)
+
+底稿如下(**自己调措辞**,跑完对比效果再改——prompt 就是代码,要迭代):
+
+```
+你是团队文档助手。仅根据以下文档片段回答问题:
+<fragments>
+{检索到的块,每块前面标 [来源:文件名#标题]}
+</fragments>
+规则:
+1. 每个论断后面标注引用,如 [接口文档.md#登录接口]
+2. 文档中找不到的信息,回答「文档中没有相关内容」,不要推测
+3. 用中文回答,简洁
+问题:{question}
+```
+
+自己调的时候思考(选择和理由写进注释):片段按 score 降序还是升序放?片段之间加分隔线吗?要不要给一个「带引用回答」的 few-shot 示例?——都是合法调参,第 9 周的评估会告诉你哪个好。
+
+#### 2.3 ChatClient:模型怎么调(25 分钟)
+
+Spring AI 的聊天入口(`chat.model=glm-5.3` 早已配好,今天它终于上岗)。概念是「把填好的模板发给 chat 模型,拿回文本」:
+
+```java
+// 概念示意(精确 API 以官方文档为准):
+// ChatClient chatClient = ChatClient.builder(chatModel).build();
+// String answer = chatClient.prompt().user(填好的模板).call().content();
+//
+// chatModel 是自动装配的 bean —— @Bean 方法参数注入,和 EmbeddingModel 同一个套路。
+// 这就是 lab01 chat() 的框架版:底下还是那个 HTTP POST,协议没变。
+```
+
+#### 2.4 AnswerService:主链路(35 分钟)
+
+```java
+package com.example.docqa.qa;
+
+import com.example.docqa.retriever.Retriever;
+import com.example.docqa.retriever.RetrievedChunk;
+
+import java.util.List;
+
+/**
+ * 问答主链路:检索 → 拼引用片段 → 调 chat → 带引用回答。
+ * 核心链路,手写。
+ */
+public class AnswerService {
+
+    private final Retriever retriever;
+    // private final ChatClient chatClient;
+
+    // TODO: 构造注入
+
+    public String answer(String question) {
+        // TODO 1: retriever.retrieve(question) 拿 top-5
+        // TODO 2: 拼 fragments —— 每块格式:
+        //           [来源:{source}#{heading}]\n{text}\n
+        //         (W5 埋的元数据第二次收租)
+        // TODO 3: 把 fragments 和 question 填进 2.2 的模板
+        // TODO 4: 调 chat,返回回答文本
+        // TODO 5(防御):检索结果为空怎么办?
+        //         —— 空片段直接短路返回「文档中没有相关内容」?
+        //           还是照样发给模型?选一个,写注释说明理由
+    }
+}
+```
+
+#### 2.5 验证(15 分钟):三个问题看三件事
+
+| 问题 | 看什么 |
+|---|---|
+| 「登录接口的限流是多少?」 | 答案是 100 次/分钟 + 引用 `[接口文档.md#登录接口]` |
+| 「密码错几次会锁定?锁定多久?」 | 跨小节答对(5 次 / 30 分钟)+ 引用正确 |
+| 「服务支持灰度发布吗?」 | **今天的彩蛋**:文档里没有!看它老实说「文档中没有相关内容」还是开始编(记录行为,Day 3 用阈值把它变成确定性拒答) |
+
+#### 2.6 常见卡点
+
+| 现象 | 原因 / 解法 |
+|---|---|
+| 回答不带引用标注 | 模板没约束住:规则里给了示例还不够,考虑加一个 few-shot 示例块 |
+| 回答掺了文档外的知识 | 「仅根据片段」被无视:加粗/前置「不要使用片段之外的知识」,严重的在 fragments 前加「以下是你唯一的信息来源」 |
+| 引用标注张冠李戴(标错文件) | 检索块的来源前缀没拼对,或模型把多个块的来源混了——fragments 里每块来源用醒目格式(如 `【来源:xx#yy】`) |
+| glm 对长模板输出截断 | max_tokens 调大;或 5 块 × 800 字挤占输出预算,考虑减块数/块长(第 9 周的变量) |
+
+**Day 2 打卡项**:
+
+- [ ] `AnswerService` 主链路跑通:「限流」问题答对 + 引用正确
+- [ ] 回答模板有自己的调参痕迹(注释里写了试过什么、为什么这么改)
+- [ ] 灰度问题的行为记录在案(编了/拒了——Day 3 的对照基线)
+- [ ] 合上文档,能重写「检索 → 拼 fragments → 填模板 → 调 chat」主链路
+- [ ] git 提交:`git add -A && git commit -m "W6D2: 带引用的回答(回答模板 + ChatClient)"`
 
 ### 📦 项目一交付物
 

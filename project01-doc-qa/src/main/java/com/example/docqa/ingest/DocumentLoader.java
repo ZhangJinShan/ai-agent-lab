@@ -48,7 +48,7 @@ public class DocumentLoader {
         this.docsDir = dir;
     }
 
-    /** 递归读取目录下所有 .md 文件, 按路径排序返回 */
+    /** 递归读取目录下所有 .md / .pdf 文件, 按路径排序返回 */
     public List<Document> loadAll() throws IOException {
         try (Stream<Path> paths = Files.walk(docsDir)) {
             return paths
@@ -109,6 +109,7 @@ public class DocumentLoader {
                 return null;
             }
             String heading = stripExt(path.getFileName().toString());
+            // 这样拼接是为了兼容和.md一样的格式，方便做section划分
             String content = "#" + heading + "\n\n" + text;
             return new Document(source, content);
         } catch (Exception e) {

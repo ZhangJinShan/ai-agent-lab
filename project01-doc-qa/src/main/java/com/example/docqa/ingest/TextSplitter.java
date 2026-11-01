@@ -25,16 +25,15 @@ public class TextSplitter {
     public List<Chunk> split(Document doc) {
         List<Chunk> chunks = new ArrayList<>();
         int chunkIndex = 0;
+        // 划 section
         for (Section section : splitSections(doc.content())) {
-            for (String block : slideWindow(section.text)) {
+            // 滑动窗口切块
+            for (String block : slideWindow(section.text())) {
                 chunks.add(new Chunk(doc.source(), section.heading(), chunkIndex ++, block));
             }
         }
         return  chunks;
     }
-
-    /** 一个小节 = 一个标题 + 它下面的正文（到下一个标题为止） */
-    private record Section(String heading, String text){}
 
     /**
      * 按照标题行分节
@@ -87,7 +86,7 @@ public class TextSplitter {
                 // 不会再多切一刀
                 break;
             }
-            // 步进 = 上限 - 重叠 = 700。下一块从 start+700 开始,
+            // 步进 = 上限 - 重叠 = 700。下一块从 start+700 开始, 重叠的目的是为了保证 chunk 之间的语义连贯
             // 它的开头 100 字 == 上一块的结尾 100 字(左闭右开,注意别算错 1)
             start += MAX_CHUNK_SIZE - OVERLAP;
         }
