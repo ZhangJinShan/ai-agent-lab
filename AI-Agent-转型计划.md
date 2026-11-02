@@ -3022,7 +3022,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
   - **思考题**:切太大 retrieval 不准,切太小丢上下文,你打算怎么验证?把假设写下来,第 9 周用评估回答它
 - [ ] `IngestCommand`:命令行跑一遍摄入,打印「加载 N 篇 → 切出 M 块 → 入库」
 
-第 6 周:检索 + 带引用的回答**
+### **第 6 周:检索 + 带引用的回答**
 
 - [ ] `Retriever`:问题 → embedding → top-k(先 k=5)→ 返回带元数据的块
 - [ ] **回答模板**(自己调,这是 prompt 工程的第一课):
@@ -4234,6 +4234,432 @@ public String answer(String question) {
 
 ---
 
+### 🧰 扩展加深(可选,每天 +30~60 分钟;第 9 周优化实验的伏笔)
+
+> 主线 5 天已达标,以下按需选做。它们不改主链路,但每一项都是第 9 周「按基线逐项改进」时会真刀真枪碰的变量——今天埋下概念、观测点和预测,到时候不慌。**铁律不变:涉及检索/回答的核心逻辑,自己手写。**
+
+#### E1. 引用校验:防「张冠李戴」的后处理(约 45 分钟)
+
+Day 2 卡点表里「引用标注张冠李戴」靠 prompt 约束,是概率性的——和 Day 3 拒答一个道理:**能用代码确定性解决的,别求模型**。做法:回答生成之后加一道后处理校验:
+
+```
+回答文本 → 正则抓出全部 [来源:xx#yy] → 逐一核对是否在本次检索的 fragments 来源集合里
+  ├─ 有引用不在集合里 → warn 日志(观测先于处理),再决定策略
+  └─ 引用全部合法 → 原样返回
+```
+
+- [ ] `CitationValidator`(手写,正则 + 集合比对,约 30 行)接进 `AnswerService` 的收尾处
+- [ ] 验证:人为构造「引用了没检索到的来源」的假回答(喂给 validator 测,不动真链路),确认 warn 日志出现
+- **思考题**:发现非法引用后,「删掉该标记」「重新生成一次」「原样返回只记日志」三种策略各自的代价是什么?——第 8 周「引用准确率」指标会告诉你哪种值得,今天先写预测
+
+#### E2. 多轮追问:query 改写(约 45 分钟)
+
+现在的 `AnswerService` 是单轮的:问「它的限流是多少?」——「它」是什么?拿这句原话去算相似度,效果稀烂。多轮文档问答要先把**指代改写成独立完整的问题**,再走检索:
+
+```
+对话历史 + 当前问题 → chat 改写:
+  「它的限流是多少?」→「登录接口的限流是多少?」
+→ 用改写后的问题检索 → 拼 fragments → 回答
+```
+
+- [ ] `QueryRewriter`:一次 chat 调用 + 固定改写 prompt;**改写失败/超时要兜底回原问题**,改写不该成为单点
+- [ ] 验证:两连问「登录接口的限流是多少?」「那密码错误呢?」第二问能正确接上下文
+- **成本账**:每次提问多一次 chat 调用——「多轮质量 vs 成本」的权衡,第 15 周模型分级路由(改写走便宜小模型)会再遇它,今天把这笔账记下来
+
+#### E3. 检索质量进阶:三个只埋概念不动手的变量(约 30 分钟,读 + 记笔记)
+
+第 9 周优化实验会碰它们,今天知道名字、原理一句话、适用场景:
+
+| 变量               | 一句话原理                         | 什么时候上                              |
+| ---------------- | ---------------------------- | ---------------------------------- |
+| Hybrid 混合检索      | 向量(语义)+ 关键词(BM25)各查各的,再融合排序  | 专有名词/错误码多的语料,纯向量常漏                |
+| Rerank 重排        | top-20 粗召回后,用重排模型精排出 top-5    | 精度不够时;多一次模型调用,延迟换质量                |
+| 多路召回 / Multi-query | 一个问题改写成 N 个角度分别检索,合并去重       | 单一 query 召回不稳时;成本 ×N               |
+
+- [ ] 三行预测写进 README「下一步」:你的语料(团队文档、错误码多)里哪个最可能有用?**先写假设,第 9 周验证**——chunking-hypothesis 的同款思维,这个习惯比这三个技术本身值钱
+
+#### E4. 流式回答(约 40 分钟,复用 W1D3 的肌肉)
+
+5 块 × 800 字的模板,glm 生成要好几秒——干等和蹦字是两个产品(第 1 周 Day 3 的老课)。Spring AI 的 `ChatClient` 支持流式输出(概念:`.stream().content()` 逐段返回,底层还是你手写过的 SSE),把回答路径换成流式,CLI 里 `print` 不 `println`。
+
+- [ ] (选做)回答路径接流式输出;拒答路径不受影响(它根本不调模型,瞬时返回)
+- **坑预警**:引用标注是生成到后半段才出现的——流式过程中前几段还没有引用,**别在流的中途跑 E1 的引用校验**,等流收尾再校验;中途校验会把「还没生成」误判成「张冠李戴」
+
+#### 🐍 Python 对照(选做,约 1 小时)
+
+LlamaIndex 三行 RAG(装 `llama-index`,同一个 embedding 供应商,同一份 docs/):
+
+```python
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+
+docs = SimpleDirectoryReader("docs").load_data()
+index = VectorStoreIndex.from_documents(docs)
+query_engine = index.as_query_engine(similarity_top_k=5)
+response = query_engine.query("登录接口的限流是多少?")
+print(response)
+for node in response.source_nodes:   # 对照你的 RetrievedChunk
+    print(node.score, node.metadata)
+```
+
+对照思考题(写进笔记):① 它的 `source_nodes` 带分数和来源——和你的 `RetrievedChunk` 信息量一样吗?② 它默认的「不知道」行为是什么(有没有阈值拒答)?③ 你手写的拒答和引用模板比它默认强在哪、弱在哪?——第 7 周的「手写 vs 框架」对照表又多了一页素材。
+
+#### 面试思考题(本周知识点 → 面试题,答案要点写进 README)
+
+1. **RAG 系统怎么防幻觉?** 三层防线:prompt grounding(概率性,防「用自己知识补全」)→ 分数阈值拒答(确定性,防「检索不到硬答」)→ 引用校验(E1,可验证,防「张冠李戴」)。能说出每层的原理、可靠性和局限,顺手带出 min-score=0.3 的来历
+2. **top-k 为什么是 5?阈值为什么是 0.3?** 诚实回答「拍的,但有观测依据(Day 1 的分数区间表:有答案 0.7+ / 无答案 <0.4),第 9 周用 50 题评估校准」——面试官要的就是「假设和事实分开」的工程素养,不是玄学调参
+3. **检索没结果、检索到不相关内容,系统行为有什么区别?** 空结果短路拒答 vs 低分拒答,两条路径对外合并到同一句「文档中没有相关内容」,但日志可区分(第 9 周校准阈值靠的就是这批分数日志)
+4. **怎么测 RAG?** 分层:离线单测测管线(FakeRetriever,`mvn test` 全绿)、评估测质量(50 题 + LLM judge 三指标)——「测的是你的管线写对没,不是模型聪不聪明」(W1D5 的原则原样搬过来)
+
+**扩展打卡项**(做完哪项勾哪项):
+
+- [ ] E1 引用校验 + warn 日志验证
+- [ ] E2 QueryRewriter + 两连问验证(含兜底回原问题)
+- [ ] E3 三个进阶变量的三行预测写进 README
+- [ ] E4 流式回答(选做)
+- [ ] Python 对照思考题三条写进笔记(选做)
+- [ ] 面试思考题 4 条的答案要点写进 README
+
+---
+
+## 第 7 周:用 Spring AI 重构(项目一 · doc-qa)
+
+**本周成果**:把 lab02/lab03 手写内核的三块能力——**工具调用、对话记忆、参数配置**——用 Spring AI 的原生抽象在 project01 里重建一遍;检索从「固定管线」升级成 **agentic RAG**(模型自己决定要不要查知识库);产出**「手写 vs Spring AI」对照表**(行为差异列填满)——这是面试必讲素材,也是第 2 周埋的那句「框架的源码只是在复述你写的东西」的验收时刻。
+
+> **先澄清一个容易懵的点**:project01 从第 5 周起就在用 Spring AI(VectorStore / EmbeddingModel / ChatClient)。本周的「重构」不是「从手写换框架」,而是**把 lab02/lab03 的 Agent 能力(工具循环、对话记忆)搬进 project01,全部用 Spring AI 原生抽象实现**——同一个能力,手写版和框架版并排对照,差异写成表。
+
+### 今天要干什么(每天约 2 小时,共 5 天)
+
+- [ ] **Day 1**:ChatClient 深入 —— system/user 拆分 + 采样参数(对照 lab03 AgentConfig)
+- [ ] **Day 2**:ChatMemory 多轮记忆 + QueryRewriter 落地(对照 lab03 ConversationMemory;W6 扩展 E2 收租)
+- [ ] **Day 3**:@Tool 把检索包成工具 —— agentic RAG(对照 lab02 run() 循环,本周心脏)
+- [ ] **Day 4**:「手写 vs Spring AI」对照表 + 行为对比实验
+- [ ] **Day 5**:Python 对照(LlamaIndex)+ README + 周自检
+
+**本周工程结构增量**:
+
+```
+project01-doc-qa/src/main/java/com/example/docqa/
+├── ingest/                          ← 第 5 周的(不动)
+├── retriever/                       ← 第 6 周的(不动,Retriever 被工具直接复用)
+├── qa/
+│   ├── AnswerService.java           ← 第 6 周的固定管线(保留!Day 4 要和 agentic 版对比)
+│   ├── QueryRewriter.java           ← Day 2:追问改写(W6 扩展 E2 的正式版)
+│   └── DocQaTools.java              ← Day 3:@Tool 检索工具(agentic RAG 入口)
+└── config/                          ← Day 1:ChatClient / ChatMemory 装配
+```
+
+> **铁律提醒(第 5–9 周)**:核心链路手写。本周的「核心链路」就是**对照实验本身**——对照表的「行为差异」列必须自己跑出来、自己填,行为对比必须自己做。别让 AI 生成对照表,它编不出你踩出来的差异。
+
+---
+
+### Day 1:ChatClient 深入 —— system/user 拆分 + 采样参数(约 2 小时)
+
+**今天把「能用的调用」升级成「讲究的调用」。** 上周 `AnswerService` 把模板整坨塞进一条 user 消息——能跑,但浪费了 system 通道的约束力。目标:system(人设+规则)/ user(数据+问题)拆开,采样参数可配,并在注释里写清它和 lab03 `AgentConfig` 的映射。
+
+#### 1.1 先想清楚:为什么要拆 system / user(15 分钟)
+
+三个理由(背下来):
+
+1. **约束力**:system 是「宪法」,user 是「本次输入」——「仅根据片段回答」「每个论断带引用」这类规则放 system,模型服从度更高
+2. **复用**:多轮对话里 system 只发一份(记忆里永远在),user 每轮换——不拆开就得每轮重复整坨模板,token 白烧
+3. **可测**:system prompt 可以单独版本化 / AB 对比(第 15 周「prompt 版本化」的前提)
+
+对照表雏形(心里先建个数,Day 4 正式填):
+
+| 你手写的(lab02/lab03)          | Spring AI 里对应                  |
+| ------------------------- | ------------------------------- |
+| AgentConfig 的 temperature/max_tokens | `ChatClient` 的 `.options(采样参数)` |
+| 自己拼 prompt 字符串             | `.system(...)` + `.user(...)` / PromptTemplate |
+
+#### 1.2 拆分 + 参数(45 分钟)
+
+概念示意(精确 API 以官方文档为准):
+
+```java
+// 概念示意:
+// chatClient.prompt()
+//     .system(systemPrompt)                                  // 角色 + grounding + 引用规则
+//     .user(userPrompt)                                      // 检索片段 + 问题
+//     .options(ChatOptions.builder().temperature(0.3).maxTokens(1024).build())
+//     .call()
+//     .content();
+```
+
+**TODO 自己填**:把上周的单坨模板拆成 `SYSTEM_TEMPLATE`(角色+三条规则)和 user 部分(`<fragments>` + 问题),**在注释里写清「片段放哪一侧、为什么」**。
+
+**思考题**(选择和理由写进注释):检索到的 5 块 fragments 放 system 还是 user?——提示:片段是「数据」不是「规则」,而且每题都变;再想想 system 在记忆里的复用性。两种都合法,第 8 周的评估会告诉你有没有差异,今天先写预测。
+
+#### 1.3 验证(20 分钟)
+
+拿 W6D4 的 8 题题单,拆分前后各跑一遍,对比记录:引用标注还在不在、答案措辞变化、拒答分支是否照常(拒答在进模型**之前**,理论上不受影响——验证它确实不受影响)。**看差异,别只看「能跑」。**
+
+#### 1.4 常见卡点
+
+| 现象                     | 原因 / 解法                                  |
+| ---------------------- | ---------------------------------------- |
+| 拆分后回答开始掺文档外知识          | grounding 规则在 user 里被「稀释」了——规则挪回 system,或加粗「以下是你唯一的信息来源」 |
+| `.options` 不生效(temperature 无效) | 选项被 yml 里的全局配置覆盖;或供应商模型(reasoning 类)忽略 temperature(第 3 周的老坑) |
+| system 里放了片段,多轮后 token 爆 | 片段每轮都变还塞 system,等于每轮重发——数据放 user 侧(1.2 思考题的另一面) |
+| 想把 maxRounds 也配进 options  | 配不进去——那是 tool calling 循环的轮次保险丝,Day 3 才登场        |
+
+**Day 1 打卡项**:
+
+- [x] system/user 拆分完成,模板两侧的内容分配有注释说明
+- [x] temperature/max_tokens 进 options,与 lab03 AgentConfig 的映射写在注释里
+- [ ] 8 题前后对比记录在案(引用/措辞/拒答三项)
+- [ ] git 提交:`git add -A && git commit -m "W7D1: ChatClient 深入 + system/user 拆分"`
+
+---
+
+### Day 2:ChatMemory 多轮记忆 + QueryRewriter(约 2 小时)
+
+**今天给 doc-qa 加上「多轮追问」能力。** 两个部件:框架版的对话记忆(对照 lab03 手写的 `ConversationMemory`),和 query 改写(W6 扩展 E2 的正式落地)——「它的限流是多少?」这种带指代的追问,先改写成独立问题再检索。
+
+#### 2.1 对照 lab03:记忆的三个问题(15 分钟)
+
+lab03 手写 `ConversationMemory` 时回答过三问,今天看框架版怎么答(答案写进对照表草稿):
+
+| 问题                | lab03 手写版的答案                  | Spring AI 的答案(今天验证)         |
+| ----------------- | ---------------------------- | ------------------------- |
+| 为什么不能无限追加?        | 成本 / 上限 / 注意力稀释(三理由)         | 同样的三理由,框架帮你管窗口            |
+| 裁什么?              | 超出 maxMessages 的最早消息          | MessageWindow 的窗口裁剪        |
+| assistant(tool_calls) + tool 整组怎么裁? | **自己写整组裁剪**(当年的灵魂)           | ?——今天观察框架拆不拆组,答案填进对照表    |
+
+第三行是今天的悬念:**框架不一定替你解决整组边界**——观察结果无论好坏都写进对照表,这就是「行为差异」列的含义。
+
+#### 2.2 装配 ChatMemory(40 分钟)
+
+概念示意(精确 API 以官方文档为准):
+
+```java
+// 概念示意:
+// ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(20).build();
+// chatClient.prompt()
+//     .system(systemPrompt)
+//     .user(question)
+//     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId))  // 会话隔离
+//     .call().content();
+// memory.clear() 对应 lab03 的 /new
+```
+
+TODO 自己填:把对话接进 REPL 入口(Day 4 正式做 CLI,今天先在 main 里跑脚本验证),`maxMessages=20` 对照 lab03 的窗口配置。
+
+#### 2.3 QueryRewriter 落地(35 分钟,W6 扩展 E2 收租)
+
+```
+对话历史 + 当前问题 → 一次 chat 调用 → 独立完整的问题
+  「它的限流是多少?」→「登录接口的限流是多少?」
+→ 改写后的问题走 retriever → 后续链路不变
+```
+
+```java
+// QueryRewriter 骨架:
+//   rewrite(历史, 当前问题):
+//     1. 固定改写 prompt(「把带指代的追问改写成独立问题,只输出改写后的问题」)
+//     2. 调 chat;改写结果为空/异常 → 兜底返回原问题(改写不该是单点)
+//     3. 日志:原问题 → 改写后问题(W4D1 的可观测肌肉)
+```
+
+#### 2.4 验证(20 分钟)
+
+复刻 lab03 W3D3 的三段验证 + 追问:
+
+1. 「我叫老张,记住这个名字」→ 「我叫什么?」答出老张(记忆生效)
+2. 「登录接口的限流是多少?」→ 「那密码错误呢?」(追问接上,改写生效——看日志里改写成了什么)
+3. 跑 20 轮后观察窗口是否裁剪(对照 lab03 W3D4 的 messageCount 观察);**故意问一句 tool_calls 相关的追问,看有没有 400**——整组边界悬念的结果
+
+#### 2.5 常见卡点
+
+| 现象                  | 原因 / 解法                                  |
+| ------------------- | ---------------------------------------- |
+| 第二轮就失忆              | 忘了传 conversationId(会话隔离没接),或 memory 没接进 advisor |
+| 改写后反而检索不准了          | 改写把关键词「洗」掉了(「限流」被改写成「接口限制」)——改写 prompt 里要求保留术语;记录案例,第 9 周评估 |
+| 每轮 token 暴涨         | 历史 + 片段都进上下文——片段别进记忆!(片段是单轮数据,user 侧每轮现拼) |
+| 多轮后服务端 400(tool 消息相关) | 框架版记忆的裁剪真把 tool 组拆了——这就是 2.1 第三行的答案,写进对照表;缓解:调大窗口/换摘要记忆(第 9 周变量) |
+
+**Day 2 打卡项**:
+
+- [ ] ChatMemory 装配完成,记名字三段验证通过
+- [ ] QueryRewriter 落地,追问两连问跑通,**改写前后对照记进日志**
+- [ ] 整组边界观察结果写进对照表草稿(不管好坏)
+- [ ] git 提交:`git add -A && git commit -m "W7D2: ChatMemory 多轮记忆 + QueryRewriter"`
+
+---
+
+### Day 3:@Tool 检索工具 —— agentic RAG(约 2.5 小时,本周的心脏)
+
+**今天把检索从「固定管线」升级成「模型自主调用的工具」。** 固定管线:每个问题都检索 → 拼片段 → 回答;agentic RAG:把检索声明成工具,**模型自己决定**要不要查、查什么。这就是 lab02 `run()` 循环的框架版——第 2 周埋的「对照」今天兑现。
+
+#### 3.1 先想清楚:两种 RAG 形态(15 分钟)
+
+|              | 固定管线(第 6 周)           | agentic RAG(今天)                |
+| ------------ | --------------------- | ---------------------------- |
+| 谁决定检索        | 你的代码(无条件检索)           | 模型(开单才查)                     |
+| 闲聊问题          | 也检索,浪费一次 embedding    | 不查,直接答                       |
+| 多跳问题(「A 和 B 哪个严格」) | 一次检索覆盖不到就完蛋          | 可以连查两次再综合                    |
+| 复杂度 / 可控性    | 简单、行为确定               | 多一轮模型决策,行为更「活」也更难测          |
+
+**两者不是替代关系**:第 6 周的 `AnswerService` 保留,Day 4 要拿它和 agentic 版对比。
+
+#### 3.2 声明工具(45 分钟)
+
+对照 lab02:`Tool` record(name/description/schema/handler)→ 框架版就是一个带注解的方法:
+
+```java
+// 概念示意(精确 API 以官方文档为准):
+// public class DocQaTools {
+//
+//     private final Retriever retriever;
+//
+//     @Tool(description = "查询团队文档知识库。当问题涉及接口文档、故障手册、配置说明时使用;"
+//             + "输入检索关键词或完整问题,返回最相关的文档片段(含来源和相似度分数)")
+//     public String searchDocs(@ToolParam("检索关键词或完整问题") String query) {
+//         // TODO 1: retriever.retrieve(query) 拿 top-5
+//         // TODO 2: 拼成带 [来源:xx#yy] 的片段文本(复用 W6D2 的拼装逻辑,抽公共方法)
+//         // TODO 3: 低分/空结果 → 返回「知识库中没有相关内容」文本给模型(错误文本喂回,lab02 的老规矩!)
+//     }
+// }
+```
+
+三个对照点(写进对照表草稿):
+
+| lab02 手写的               | Spring AI 对应物                    |
+| ----------------------- | ------------------------------- |
+| `Tool` record 的 description + JSON Schema | `@Tool` / `@ToolParam` 的描述(就是 prompt) |
+| `ToolRegistry.register()` | 注册为 bean / `@Tool` 方法自动收集         |
+| `registry.execute()` 的错误文本兜底 | **还是你自己的事**——方法内部 catch 后返回错误文本,框架不替你兜 |
+
+> description 就是 prompt(lab02 Day 4 的老课):「什么时候该用我、参数怎么填」写清楚,模型的选择准确率天差地别。**今天的 description 自己措辞,写完和我给的底稿对比差异**。
+
+#### 3.3 跑通循环(30 分钟)
+
+提问入口换成 agentic 版(概念:同一 `ChatClient`,声明 tools 后,**框架内建「开单 → 执行 → 喂回」循环**——就是你 lab02 `run()` 手写的那个循环,现在藏在框架里)。配置里设最大轮次(对照 lab02 的 `MAX_ROUNDS`,保险丝不能丢)。
+
+#### 3.4 验证:三类问题看三件事(20 分钟)
+
+| 问题                        | 看什么                                  |
+| ------------------------- | ------------------------------------ |
+| 「登录接口的限流是多少?」              | 模型**调用** searchDocs,答 100 次/分钟 + 引用    |
+| 「你好,你是谁?」                 | 模型**不调**工具直接答(省一次检索)——对照固定管线的无条件检索    |
+| 「登录限流和密码锁定策略,哪个更严格?」     | 一次不够就调两次(多跳),综合回答——对照 3.1 表的第三行       |
+
+#### 3.5 常见卡点
+
+| 现象                     | 原因 / 解法                                  |
+| ---------------------- | ---------------------------------------- |
+| 模型死活不调工具               | description 太含糊,或问题和知识库「看起来无关」;对照 lab02 W2D2 的卡点表,一模一样的病 |
+| 每句话都调工具(包括闲聊)          | description 写成了「必须使用」;在工具描述里补「仅当需要查文档时使用」 |
+| 工具返回后模型编造内容            | 工具返回文本没带「来源」,或低分结果没拒——3.2 的 TODO 3 没做,错误文本喂回是你的责任 |
+| 想看每轮工具调用的流转            | 打开 tool calling 的日志/回调(W4D1 肌肉)——对照 lab02 的 `[调用工具]` 日志,框架版的信息量对比写进笔记 |
+| 循环停不下来                 | 轮次上限没配;对照 lab03 AgentConfig 的 maxRounds,保险丝必须在 |
+
+**Day 3 打卡项**:
+
+- [ ] `DocQaTools.searchDocs` 完成(含空结果/低分的错误文本兜底)
+- [ ] description / `@ToolParam` 有自己措辞的痕迹(和底稿对比的差异注释)
+- [ ] 三类问题验证跑通:该调的调、闲聊不调、多跳能连查
+- [ ] 能口头说清:框架的 tool calling 流程和 lab02 `run()` 的五个步骤(解析 → 回传 assistant → 执行 → 喂回 → 循环)怎么对应
+- [ ] git 提交:`git add -A && git commit -m "W7D3: @Tool 检索工具(agentic RAG)"`
+
+---
+
+### Day 4:「手写 vs Spring AI」对照表 + 行为对比实验(约 2 小时)
+
+**今天产出本周的门面交付物。** 对照表大纲里就有,但空着「行为差异」列——**那一列必须靠今天的行为对比实验填出来**,不是看文档编出来的。
+
+#### 4.1 行为对比实验(60 分钟)
+
+**实验设计(控制变量,老规矩)**:同一批题(W6D4 的 8 题 + 追问若干)、同一个模型、同样的 system 规则,跑两条路径:
+
+```
+路径 A(固定管线):AnswerService(W6 的)
+路径 B(agentic):DocQaTools + tool calling(昨天的)
+```
+
+每题记录(表存进 README):
+
+| 题目 | 路径 A:行为/引用/调用次数 | 路径 B:行为/引用/工具调用次数 | 差异归因 |
+| ---- | ---------------- | ------------------ | ---- |
+
+重点观察四件事:① 闲聊题 B 少花几次调用;② 多跳题 B 是否更全;③ 拒答行为两版是否一致(阈值拒答在 Retriever 里,B 也该拒——验证!);④ token 成本(A 每题固定检索,B 由模型决定)。
+
+#### 4.2 填对照表(45 分钟,面试必讲)
+
+大纲里那张表的四行,**「行为差异」列用 4.1 的实验结果填**:
+
+| 你手写的                     | Spring AI 里对应            | 行为差异(用实验结果填,示例格式) |
+| ------------------------ | ------------------------ | ---------------- |
+| `Tool` record + registry | `@Tool` / `ToolCallback` | 如:声明方式从数据(record)变注解;错误兜底仍需自己写…… |
+| `run()` 循环               | 默认 tool calling 流程       | 如:流转日志粒度不同;MAX_ROUNDS 变成配置…… |
+| `ConversationMemory`     | `ChatMemory` / advisor   | 如:整组裁剪边界(2.1 悬念的答案)…… |
+| 自己拼 prompt               | `ChatClient` + template  | 如:system/user 拆分后约束力变化…… |
+
+每一行至少一条差异 + 一条「框架没帮你做、你还得自己做的事」——**后者才是面试官想听的**(用框架谁都会,知道框架的边界才是功力)。
+
+#### 4.3 常见卡点
+
+| 现象                 | 原因 / 解法                                  |
+| ------------------ | ---------------------------------------- |
+| 对照表写成了 API 名词对照   | 那是翻译不是对照!差异列必须是**行为**(什么时候调工具/裁剪边界/错误兜底),来自 4.1 的实验 |
+| 两版结果不一致,不知道写哪个对  | 都对,写清场景:A 简单可控,B 灵活省调用——「什么场景选什么」是加分项 |
+| 实验跑出随机差异          | 每题多跑几次取多数(temperature 对齐 0.3 以下);LLM 不确定性是第 3 周的老课 |
+
+**Day 4 打卡项**:
+
+- [ ] A/B 对比表(题 → 两版行为 → 差异归因)记录归档
+- [ ] 对照表四行「行为差异」列填满,每行含「框架没帮你做的事」
+- [ ] git 提交:`git add -A && git commit -m "W7D4: 手写 vs Spring AI 对照表 + 行为对比"`
+
+---
+
+### Day 5:Python 对照(LlamaIndex)+ README + 周自检(约 2 小时)
+
+**今天用另一个框架交叉验证你对 RAG 原理的理解,然后收周。**
+
+#### 5.1 LlamaIndex 对照(50 分钟)
+
+同一份 `docs/`,Python 三行 RAG(W6 扩展里贴过的脚本,今天正式跑):
+
+```python
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+
+docs = SimpleDirectoryReader("docs").load_data()
+index = VectorStoreIndex.from_documents(docs)
+query_engine = index.as_query_engine(similarity_top_k=5)
+response = query_engine.query("登录接口的限流是多少?")
+for node in response.source_nodes:
+    print(node.score, node.metadata.get("file_name"), node.text[:80])
+```
+
+**对比检索结果差异(大纲指定动作)**:Java 版和 Python 版的 top-5 来源/分数抄下来对照。差异归因要落到具体变量——注意 embedding 是同一家、语料是同一份,那差异从哪来?**切块**(LlamaIndex 默认 splitter 和你的 800/100 不同)、**元数据字段名**、**分数计算**。把归因写清楚,这比「差异存在」本身值钱。
+
+#### 5.2 README 更新(30 分钟)
+
+- **对照表**(4.2 的成品,贴上)——放在 project01 章节显眼位置
+- **A/B 行为对比摘要**(4.1 的表 + 一句「什么场景选什么」的结论)
+- **LlamaIndex 对比归因**(5.1 的发现)
+- 踩坑记录追加本周 3 条最痛的
+
+#### 5.3 周自检(20 分钟,诚实回答)
+
+- [ ] `@Tool` 方法和 lab02 `Tool` record 的四个要素(name/description/schema/handler)一一对得上吗?哪个要素框架没替你做?
+- [ ] 固定管线和 agentic RAG 的适用场景,能不能不看表说出两条?
+- [ ] 对照表的「行为差异」列,哪几条是你实验跑出来的、哪几条是抄文档的?(抄的那几条删掉重填)
+- [ ] 今天 LlamaIndex 的检索差异归因,能不能一句话讲给同事听?
+
+#### 5.4 收尾
+
+- [ ] 进度日志:附录 C 填 W7 一行
+- [ ] git 提交:`git add -A && git commit -m "W7D5: LlamaIndex 对照 + README + 周自检"`
+
+**Day 5 打卡项**:
+
+- [ ] LlamaIndex 跑通,检索差异归因写进 README
+- [ ] 对照表 + A/B 对比摘要进 README
+- [ ] 周自检 4 条诚实过关
+
+---
+
 ### 📦 项目一交付物
 
 - [ ] 可运行服务(命令行或简单 Web 界面都行)+ 一份测试文档集
@@ -4369,5 +4795,6 @@ get_ticket_detail(ticketId)                → 工单详情
 | W3 | lab03:AgentConfig / 滑动窗口记忆 / 多轮 REPL + temperature 实验 | tool 消息键名写成 tool_id;system 消息每轮重复堆积 | 上下文工程第一课:记忆不是越多越好 |
 | W4 | 工程化:traceId 日志、Token 算钱、指数退避重试、三级超时体系,22 单测全绿 | isRetryable 默认不认 RuntimeException;mvn test 假绿(surefire 太老,Tests run: 0) | 生产护甲全是后端基本功的平移 |
 | W5 | project01:摄入流水线——DocumentLoader(.md/.pdf+Tika)+ 手写 TextSplitter(800/100)+ Embedding 入库 + 10 单测离线全绿 | tika 聚合包缺 tika-core;@SpringBootTest 误跑 CommandLineRunner 真调 API;Document 包名撞车 | 切块是检索质量的天花板;假向量测管线,真质量留给评估 |
+| W6 | project01:检索+带引用回答——Retriever(分数观测)/ 回答模板(grounding+引用)/ 0.3 阈值拒答 / FakeRetriever 8 单测 + eval 题单 15+ | getScore() 判空兜底;假向量测不了命中率(改 FakeRetriever 分层);拒答文案要和模板一字不差 | 「检索到了什么」和「检索到的靠不靠谱」是两回事;该不知道就说不知道 |
 ...（每周日填写,16 周后这就是你的转行叙事素材）
 ```
