@@ -46,6 +46,9 @@ public class TextSplitter {
         StringBuilder buf = new StringBuilder();
         // -1 保留结尾空行，换行信息不丢
         for (String line : content.split("\n", -1)) {
+            // 去掉 Windows CRLF 残留在行尾的 \r:否则 HEADING 用 matches() 整行匹配时,
+            // 末尾 \r 无法被 .* 消费,标题行会误判成普通行(整篇退化成一个无标题 section)
+            line = line.replaceAll("\r$", "");
             if (HEADING.matcher(line).matches()) {
                 // 遇到新标题 → 先收割当前节
                 // trim 后为空的节（如文档大标题和第一个小标题之间只有空行）直接丢弃
