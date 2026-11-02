@@ -84,4 +84,21 @@ public class TextSplitterTest {
         assertEquals(1, splitter.split(new Document("a.md", "b".repeat(800))).size());
         assertEquals(2, splitter.split(new Document("a.md", "b".repeat(801))).size());
     }
+
+    @Test
+    void CRLF文档_标题仍可被识别() {
+        // 模拟 Windows 保存的 CRLF 文档:行尾带 \r(故障手册.md 实测 93 处 CRLF)
+        String crlf = "# 用户中心故障处理手册\r\n"
+                + "\r\n"
+                + "## 故障等级定义\r\n"
+                + "等级说明\r\n"
+                + "## 登录大面积失败(网关 500)\r\n"
+                + "登录失败处理\r\n";
+        List<Chunk> chunks = splitter.split(new Document("故障手册.md", crlf));
+
+        // 大标题下无正文被丢弃,剩 2 个有标题小节
+        assertEquals(2, chunks.size());
+        assertEquals("故障等级定义", chunks.get(0).heading());
+        assertEquals("登录大面积失败(网关 500)", chunks.get(1).heading());
+    }
 }

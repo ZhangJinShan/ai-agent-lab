@@ -42,7 +42,7 @@ public class Retriever {
         // ① getMetadata().get(...) 取出来是 Object,统一 String.valueOf
         // ② getScore() 返回 Double 可能为 null(不同 VectorStore 实现行为不一)—— 判空兜底 0.0 + warn
         Object sourceObj = doc.getMetadata().get("source");
-        Object headingObj = doc.getMetadata().remove("heading");
+        Object headingObj = doc.getMetadata().get("heading");
         Double scoreObj = doc.getScore();
         String source = sourceObj == null ? "" : String.valueOf(sourceObj);
         String heading = headingObj == null ? "" : String.valueOf(headingObj);
@@ -50,8 +50,5 @@ public class Retriever {
             log.warn("Document.getScore() is null for source={}, heading={} —— 该 VectorStore 实现不吐分数,已兜底 0.0", source, heading);
         }
         return new RetrievedChunk(doc.getText(), source, heading, scoreObj == null ? 0.0 : scoreObj);
-
-
-
     }
 }

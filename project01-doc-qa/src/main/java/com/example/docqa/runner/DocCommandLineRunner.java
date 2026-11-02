@@ -105,7 +105,15 @@ public class DocCommandLineRunner implements CommandLineRunner {
                 "max-active 最大能配到多少?",
                 "明天的天气怎么样?",
                 "如何把超时时间改成 1 小时?",
-                "登录接口支持 1000 次/分钟的限流吗?"
+                "登录接口支持 1000 次/分钟的限流吗?",
+                "短信验证码收不到时,可以引导用户用什么替代方案?",
+                "登录接口的限流能不能调大?",
+                "数据库连接池 maximum-pool-size 能配到多少?",
+                "服务支持暗黑模式或夜间模式吗?",
+                "缓存 user-info 的 ttl 默认是 30 分钟吗?",
+                "把 read-timeout 调到 10 分钟可以吗?",
+                "密码连续错 3 次会锁定账号吗?",
+                "Redis 连接池 max-active 默认是 100 吗?"
         );
         for (String question : questions) {
             String answer = answerService.answer(question);

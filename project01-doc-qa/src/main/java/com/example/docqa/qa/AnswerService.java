@@ -60,9 +60,7 @@ public class AnswerService {
     private String buildFragments(List<RetrievedChunk> chunks) {
         StringBuilder fragments = new StringBuilder();
         for (RetrievedChunk chunk : chunks) {
-            fragments.append("[来源：")
-                    .append(chunk.source()).append("#")
-                    .append(chunk.heading()).append("]\n")
+            fragments.append("[来源：").append(chunk.source()).append("#").append(chunk.heading()).append("]\n")
                     .append(" --- 得分是:[").append(chunk.score()).append("]\n")
                     .append(chunk.text()).append("\n\n");
         }
