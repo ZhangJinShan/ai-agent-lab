@@ -9,7 +9,7 @@
 {"id": 9, "question": "如何把超时时间改成 1 小时?", "expected": "纠错:指出文档中 read-timeout 上限是 300 秒,不存在 1 小时的说法,引用 配置说明.md#超时配置", "type": "trap"}
 {"id": 10, "question": "登录接口支持 1000 次/分钟的限流吗?", "expected": "纠错:限流是 100 次/分钟而非 1000,引用 接口文档.md#登录接口", "type": "trap"}
 {"id": 11, "question": "短信验证码收不到时,可以引导用户用什么替代方案?", "expected": "应引用 故障手册.md#短信验证码收不到,提到引导用户使用「语音验证码」作为替代方案", "type": "factual"}
-{"id": 12, "question": "登录接口的限流能不能调大?", "expected": "文档未明确「能否调大」登录限流,只说明调整属对外行为变更需产品和安全双签、大促期网关会临时收紧;期望回答「文档中没有相关内容」而非瞎猜能或不能", "type": "abstain"}
+{"id": 12, "question": "登录接口的限流能不能调大?", "expected": "应引用 配置说明.md#接口限流配置,说明调整需产品和安全双签、限流在网关层执行且大促会临时收紧,结论为可以调大但有条件(而非「文档中没有相关内容」)", "type": "factual"}
 {"id": 13, "question": "数据库连接池 maximum-pool-size 能配到多少?", "expected": "文档只说默认 20、调大前需评估 MySQL max_connections 余量,未给明确上限数值,期望回答「文档中没有相关内容」", "type": "abstain"}
 {"id": 14, "question": "服务支持暗黑模式或夜间模式吗?", "expected": "文档中无界面主题相关内容,与主题无关,应回答「文档中没有相关内容」", "type": "abstain"}
 {"id": 15, "question": "缓存 user-info 的 ttl 默认是 30 分钟吗?", "expected": "纠错:默认是 10 分钟而非 30 分钟,引用 配置说明.md#缓存策略(cache.user-info.ttl=10 分钟)", "type": "trap"}
