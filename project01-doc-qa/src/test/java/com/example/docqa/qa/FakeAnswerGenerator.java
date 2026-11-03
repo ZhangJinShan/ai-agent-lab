@@ -13,12 +13,15 @@ public class FakeAnswerGenerator implements AnswerGenerator {
 
     private String answer = "假回答";
 
-    private String lastPrompt = "";
+    private String lastSystem = "";
+
+    private String lastUser = "";
 
     @Override
-    public String generate(String prompt) {
+    public String generate(String systemPrompt, String userPrompt) {
         callCounter.incrementAndGet();
-        lastPrompt = prompt;
+        lastSystem = systemPrompt;
+        lastUser = userPrompt;
         return answer;
     }
 
@@ -27,7 +30,7 @@ public class FakeAnswerGenerator implements AnswerGenerator {
     }
 
     public String lastPrompt(){
-        return lastPrompt;
+        return lastUser;
     }
 
     public void setAnswer(String answer){

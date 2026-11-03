@@ -4,7 +4,6 @@ import com.example.docqa.retriever.RetrievedChunk;
 import com.example.docqa.retriever.Retriever;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.List;
 
@@ -16,6 +15,15 @@ import java.util.List;
 public class AnswerService {
 
     private final static Logger logger = LoggerFactory.getLogger(AnswerService.class);
+
+    private static final String SYSTEM_TEMPLATE = """
+            你是团队文档助手。
+            规则:
+            1. 仅根据提供的文档片段回答问题,不要使用片段以外的知识
+            2. 每个论断后面标注引用,如 [接口文档.md#登录接口]
+            3. 文档中找不到的信息,回答「文档中没有相关内容」,不要推测
+            4. 用中文回答,简洁
+            """;
 
     private final Retriever retriever;
 
@@ -44,9 +52,9 @@ public class AnswerService {
         // 2. 拼 fragments → 每块格式[来源: {source}#{heading}]\n{text}\n\n
         String fragments = buildFragments(chunks);
         // 3. 把 fragments + question 填进回答模板
-        String prompt = buildPrompt(fragments, question);
+        String userPrompt = buildUserPrompt(fragments, question);
         // 4. 调 chat, 拿回文本
-        return answerGenerator.generate(prompt);
+        return answerGenerator.generate(SYSTEM_TEMPLATE, userPrompt);
     }
 
     private String buildFragments(List<RetrievedChunk> chunks) {
@@ -59,17 +67,12 @@ public class AnswerService {
         return fragments.toString();
     }
 
-    private String buildPrompt(String fragments, String question) {
+    private String buildUserPrompt(String fragments, String question) {
         // 自己调措辞:片段按 score 降序放(检索已排序);要不要 few-shot 示例你自己试,理由写注释
         return """
-                你是团队文档助手。仅根据以下文档片段回答问题:
                 <fragments>
                 %s
                 </fragments>
-                规则:
-                1. 每个论断后面标注引用,如 [接口文档.md#登录接口]
-                2. 文档中找不到的信息,回答「文档中没有相关内容」,不要推测
-                3. 用中文回答,简洁
                 问题:%s
                 """.formatted(fragments, question);
     }
