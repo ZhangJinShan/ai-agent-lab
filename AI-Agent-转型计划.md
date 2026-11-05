@@ -4479,10 +4479,10 @@ TODO 自己填:把对话接进 REPL 入口(Day 4 正式做 CLI,今天先在 main
 
 **Day 2 打卡项**:
 
-- [ ] ChatMemory 装配完成,记名字三段验证通过
-- [ ] QueryRewriter 落地,追问两连问跑通,**改写前后对照记进日志**
-- [ ] 整组边界观察结果写进对照表草稿(不管好坏)
-- [ ] git 提交:`git add -A && git commit -m "W7D2: ChatMemory 多轮记忆 + QueryRewriter"`
+- [x] ChatMemory 装配完成,记名字三段验证通过
+- [x] QueryRewriter 落地,追问两连问跑通,**改写前后对照记进日志**
+- [x] 整组边界观察结果写进对照表草稿(不管好坏)
+- [x] git 提交:`git add -A && git commit -m "W7D2: ChatMemory 多轮记忆 + QueryRewriter"`
 
 ---
 

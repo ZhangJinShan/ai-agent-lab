@@ -2,6 +2,7 @@ package com.example.docqa.config;
 
 import com.example.docqa.ingest.DocumentLoader;
 import com.example.docqa.ingest.TextSplitter;
+import com.example.docqa.qa.QueryRewriter;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -38,14 +39,19 @@ public class DocQaConfig {
 	}
 
 	@Bean
+	ChatMemory chatMemory(@Value("${docqa.max-message:20}") int maxMessages){
+		return MessageWindowChatMemory.builder().maxMessages(maxMessages).build();
+	}
+
+	@Bean
+	QueryRewriter queryRewriter(ChatModel chatModel, ChatMemory chatMemory){
+		return new QueryRewriter(chatModel, chatMemory);
+	}
+
+	@Bean
 	ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory) {
 		return ChatClient.builder(chatModel)
 				.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
 				.build();
-	}
-
-	@Bean
-	ChatMemory chatMemory(@Value("${docqa.max-message:20}") int maxMessages){
-		return MessageWindowChatMemory.builder().maxMessages(maxMessages).build();
 	}
 }

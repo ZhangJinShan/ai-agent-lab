@@ -6,11 +6,13 @@ import com.example.docqa.ingest.DocumentLoader;
 import com.example.docqa.ingest.TextSplitter;
 import com.example.docqa.qa.AnswerService;
 import com.example.docqa.qa.ChatClientAnswerGenerator;
+import com.example.docqa.qa.QueryRewriter;
 import com.example.docqa.retriever.Retriever;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -41,6 +43,8 @@ public class DocCommandLineRunner implements CommandLineRunner {
     private final ChatClient chatClient;
     private final int topK;
     private final double minScore;
+    private final QueryRewriter queryRewriter;
+    private final ChatMemory chatMemory;
 
     public DocCommandLineRunner(DocumentLoader loader,
                                 TextSplitter textSplitter,
@@ -48,7 +52,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
                                 VectorStore vectorStore,
                                 ChatClient chatClient,
                                 @Value("${docqa.retrieval.top-k:5}") int topK,
-                                @Value("${docqa.retrieval.min-score:0.3}") double minScore) {
+                                @Value("${docqa.retrieval.min-score:0.3}") double minScore, QueryRewriter queryRewriter, ChatMemory chatMemory) {
         this.loader = loader;
         this.textSplitter = textSplitter;
         this.embeddingModel = embeddingModel;
@@ -56,6 +60,8 @@ public class DocCommandLineRunner implements CommandLineRunner {
         this.chatClient = chatClient;
         this.topK = topK;
         this.minScore = minScore;
+        this.queryRewriter = queryRewriter;
+        this.chatMemory = chatMemory;
     }
 
     @Override
@@ -97,7 +103,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
 
         // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
         Retriever retriever = new Retriever(vectorStore, topK);
-        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore);
+        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore, "repl", queryRewriter, chatMemory);
 //        List<String> questions = List.of(
 //                "登录接口的限流是多少？",
 //                "密码连续错几次会锁定?锁定多久?",

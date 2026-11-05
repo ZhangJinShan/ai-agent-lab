@@ -26,5 +26,5 @@ docqa:
     chat: false
   retrieval:
     top-k: 5
-    min-score: 0.35 # 拒答阈值
+    min-score: 0.37 # 拒答阈值
   max-message: 20

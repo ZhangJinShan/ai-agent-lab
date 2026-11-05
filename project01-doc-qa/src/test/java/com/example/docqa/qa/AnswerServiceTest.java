@@ -3,6 +3,8 @@ package com.example.docqa.qa;
 import com.example.docqa.retriever.FakeRetriever;
 import com.example.docqa.retriever.RetrievedChunk;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 
 import java.util.List;
 import java.util.Map;
@@ -121,6 +123,25 @@ public class AnswerServiceTest {
         var service = new AnswerService(retriever, fakeChat, MIN_SCORE);
         assertEquals("文档中没有相关内容", service.answer("某个不存在的配置项是多少?"));
         assertEquals(0, fakeChat.callCount());
+    }
+
+    @Test
+    void 拒答补记忆_两条拒答路径都写入_且仍不调chat() {
+        ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(20).build();
+        var fakeChat = new FakeAnswerGenerator();
+        var lowScoreRetriever = new FakeRetriever(Map.of(
+                "灰度", List.of(new RetrievedChunk("灰度相关描述", "配置说明.md", "开关配置", 0.18))));
+        var emptyRetriever = new FakeRetriever(Map.of());
+        String cid = "abstain-test";
+
+        var lowService = new AnswerService(lowScoreRetriever, fakeChat, MIN_SCORE, cid, null, memory);
+        var emptyService = new AnswerService(emptyRetriever, fakeChat, MIN_SCORE, cid, null, memory);
+
+        assertEquals("文档中没有相关内容", lowService.answer("服务支持灰度发布吗?"));
+        assertEquals("文档中没有相关内容", emptyService.answer("某个不存在的配置项是多少?"));
+
+        assertEquals(4, memory.get(cid).size(), "每轮拒答应写入 user + assistant 两条");
+        assertEquals(0, fakeChat.callCount(), "补记忆不能变成调 chat");
     }
 
 }
