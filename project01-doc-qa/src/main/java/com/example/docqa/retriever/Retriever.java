@@ -17,12 +17,18 @@ public class Retriever {
 
     private static final Logger log = LoggerFactory.getLogger(Retriever.class);
 
-    private static final int TOP_K = 5;
-
     private final VectorStore vectorStore;
 
+    private final int TOP_K;
+
     public Retriever(VectorStore vectorStore) {
+        this(vectorStore, 5);
+
+    }
+
+    public Retriever(VectorStore vectorStore, int topK){
         this.vectorStore = vectorStore;
+        this.TOP_K = topK;
     }
 
     public List<RetrievedChunk> retrieve(String question){

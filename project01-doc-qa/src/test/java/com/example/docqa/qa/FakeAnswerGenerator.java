@@ -18,7 +18,7 @@ public class FakeAnswerGenerator implements AnswerGenerator {
     private String lastUser = "";
 
     @Override
-    public String generate(String systemPrompt, String userPrompt) {
+    public String generate(String systemPrompt, String userPrompt, String conversationId) {
         callCounter.incrementAndGet();
         lastSystem = systemPrompt;
         lastUser = userPrompt;

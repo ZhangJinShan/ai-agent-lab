@@ -22,7 +22,9 @@ spring:
 docqa:
   docs-dir: docs      # 文档路径(相对启动工作目录,IDEA 运行配置里设 $MODULE_DIR$)
   runner:
-    enabled: true
+    doc: true
+    chat: false
   retrieval:
     top-k: 5
     min-score: 0.35 # 拒答阈值
+  max-message: 20

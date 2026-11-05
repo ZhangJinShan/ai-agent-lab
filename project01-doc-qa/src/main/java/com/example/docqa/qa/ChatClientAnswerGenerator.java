@@ -1,6 +1,7 @@
 package com.example.docqa.qa;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.ChatOptions;
 
 /**
@@ -17,11 +18,12 @@ public class ChatClientAnswerGenerator implements AnswerGenerator {
     }
 
     @Override
-    public String generate(String systemPrompt, String userPrompt) {
+    public String generate(String systemPrompt, String userPrompt, String conversationId) {
         return chatClient.prompt()
                 .system(systemPrompt)
                 .user(userPrompt)
                 .options(ChatOptions.builder().temperature(0.3).maxTokens(1024))
+                .advisors(advisorSpec -> advisorSpec.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
     }

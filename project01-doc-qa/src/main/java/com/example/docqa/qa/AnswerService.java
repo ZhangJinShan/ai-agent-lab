@@ -31,10 +31,18 @@ public class AnswerService {
 
     private final double minScore;
 
+    // 多轮记忆的会话标识;默认 "default" 即让同一 AnswerService 实例共享上下文
+    private final String conversationId;
+
     public AnswerService(Retriever retriever, AnswerGenerator answerGenerator, double minScore) {
+       this(retriever, answerGenerator, minScore, "default");
+    }
+
+    public AnswerService(Retriever retriever, AnswerGenerator answerGenerator, double minScore, String conversationId) {
         this.retriever = retriever;
         this.answerGenerator = answerGenerator;
         this.minScore = minScore;
+        this.conversationId = conversationId;
     }
 
     public String answer(String question) {
@@ -54,7 +62,7 @@ public class AnswerService {
         // 3. 把 fragments + question 填进回答模板
         String userPrompt = buildUserPrompt(fragments, question);
         // 4. 调 chat, 拿回文本
-        return answerGenerator.generate(SYSTEM_TEMPLATE, userPrompt);
+        return answerGenerator.generate(SYSTEM_TEMPLATE, userPrompt, conversationId);
     }
 
     private String buildFragments(List<RetrievedChunk> chunks) {
