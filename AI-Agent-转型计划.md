@@ -4555,11 +4555,11 @@ TODO 自己填:把对话接进 REPL 入口(Day 4 正式做 CLI,今天先在 main
 
 **Day 3 打卡项**:
 
-- [ ] `DocQaTools.searchDocs` 完成(含空结果/低分的错误文本兜底)
-- [ ] description / `@ToolParam` 有自己措辞的痕迹(和底稿对比的差异注释)
-- [ ] 三类问题验证跑通:该调的调、闲聊不调、多跳能连查
-- [ ] 能口头说清:框架的 tool calling 流程和 lab02 `run()` 的五个步骤(解析 → 回传 assistant → 执行 → 喂回 → 循环)怎么对应
-- [ ] git 提交:`git add -A && git commit -m "W7D3: @Tool 检索工具(agentic RAG)"`
+- [x] `DocQaTools.searchDocs` 完成(含空结果/低分的错误文本兜底)
+- [x] description / `@ToolParam` 有自己措辞的痕迹(和底稿对比的差异注释)
+- [x] 三类问题验证跑通:该调的调、闲聊不调、多跳能连查
+- [x] 能口头说清:框架的 tool calling 流程和 lab02 `run()` 的五个步骤(解析 → 回传 assistant → 执行 → 喂回 → 循环)怎么对应
+- [x] git 提交:`git add -A && git commit -m "W7D3: @Tool 检索工具(agentic RAG)"`
 
 ---
 

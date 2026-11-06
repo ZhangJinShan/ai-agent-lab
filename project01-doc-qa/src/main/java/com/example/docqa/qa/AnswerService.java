@@ -2,6 +2,7 @@ package com.example.docqa.qa;
 
 import com.example.docqa.retriever.RetrievedChunk;
 import com.example.docqa.retriever.Retriever;
+import com.example.docqa.tool.Fragments;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -19,7 +20,7 @@ public class AnswerService {
 
     private final static Logger logger = LoggerFactory.getLogger(AnswerService.class);
 
-    private static final String SYSTEM_TEMPLATE = """
+    public static final String SYSTEM_TEMPLATE = """
             你是团队文档助手。
             规则:
             1. 仅根据提供的文档片段回答问题,不要使用片段以外的知识
@@ -81,7 +82,7 @@ public class AnswerService {
             return "文档中没有相关内容";
         }
         // 2. 拼 fragments → 每块格式[来源: {source}#{heading}]\n{text}\n\n
-        String fragments = buildFragments(chunks);
+        String fragments = Fragments.format(chunks);
         // 3. 把 fragments + question 填进回答模板
         String userPrompt = buildUserPrompt(fragments, effectiveQuestion);
         // 4. 调 chat, 拿回文本
@@ -96,16 +97,6 @@ public class AnswerService {
         chatMemory.add(conversationId, List.of(
                 new UserMessage(question),
                 new AssistantMessage("文档中没有相关内容")));
-    }
-
-    private String buildFragments(List<RetrievedChunk> chunks) {
-        StringBuilder fragments = new StringBuilder();
-        for (RetrievedChunk chunk : chunks) {
-            fragments.append("[来源：").append(chunk.source()).append("#").append(chunk.heading()).append("]\n")
-                    .append(" --- 得分是:[").append(chunk.score()).append("]\n")
-                    .append(chunk.text()).append("\n\n");
-        }
-        return fragments.toString();
     }
 
     private String buildUserPrompt(String fragments, String question) {

@@ -8,6 +8,7 @@ import com.example.docqa.qa.AnswerService;
 import com.example.docqa.qa.ChatClientAnswerGenerator;
 import com.example.docqa.qa.QueryRewriter;
 import com.example.docqa.retriever.Retriever;
+import com.example.docqa.tool.DocQaTools;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -46,13 +48,18 @@ public class DocCommandLineRunner implements CommandLineRunner {
     private final QueryRewriter queryRewriter;
     private final ChatMemory chatMemory;
 
+    private final ChatClient agenticClient;
+
     public DocCommandLineRunner(DocumentLoader loader,
                                 TextSplitter textSplitter,
                                 EmbeddingModel embeddingModel,
                                 VectorStore vectorStore,
-                                ChatClient chatClient,
+                                @Qualifier(value = "chatClient") ChatClient chatClient,
                                 @Value("${docqa.retrieval.top-k:5}") int topK,
-                                @Value("${docqa.retrieval.min-score:0.3}") double minScore, QueryRewriter queryRewriter, ChatMemory chatMemory) {
+                                @Value("${docqa.retrieval.min-score:0.3}") double minScore,
+                                QueryRewriter queryRewriter,
+                                ChatMemory chatMemory,
+                                @Qualifier(value = "agenticClient") ChatClient agenticClient) {
         this.loader = loader;
         this.textSplitter = textSplitter;
         this.embeddingModel = embeddingModel;
@@ -62,6 +69,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
         this.minScore = minScore;
         this.queryRewriter = queryRewriter;
         this.chatMemory = chatMemory;
+        this.agenticClient = agenticClient;
     }
 
     @Override
@@ -69,6 +77,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
         // 加载文档
         List<Document> docs = loader.loadAll();
         log.info("Loaded {} documents", docs.size());
+
         // 切割文档
         List<Chunk> chunks = new ArrayList<>();
         for (Document doc : docs) {
@@ -78,6 +87,7 @@ public class DocCommandLineRunner implements CommandLineRunner {
             }
         }
         log.info("切出 {} 块", chunks.size());
+
         // 向量化：演示一次看维度
         if (!chunks.isEmpty()) {
             float[] embed = embeddingModel.embed(chunks.get(0).text());
@@ -88,52 +98,36 @@ public class DocCommandLineRunner implements CommandLineRunner {
         List<org.springframework.ai.document.Document> springDocs = chunks.stream().map(this::toSpringDoc).toList();
         vectorStore.add(springDocs);
 
-        // ⑤ 冒烟验证:查一句文档里有的问题,top-3 应命中「登录接口」那个块
-        var results = vectorStore.similaritySearch(
-                SearchRequest.builder().query("登录接口的限流是多少").topK(3).build());
-        for (org.springframework.ai.document.Document r : results) {
-            String text = r.getText();
-            if (null == text || text.isBlank()) {
-                log.warn("Document.getText() is null or blank");
-                continue;
-            }
-            log.info("[命中] {}#{}: {}", r.getMetadata().get("source"),
-                    r.getMetadata().get("heading"), text.substring(0, 40));
-        }
-
-        // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
+        // 初始化检索器
         Retriever retriever = new Retriever(vectorStore, topK);
-        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore, "repl", queryRewriter, chatMemory);
-//        List<String> questions = List.of(
-//                "登录接口的限流是多少？",
-//                "密码连续错几次会锁定?锁定多久?",
-//                "修改密码有频率限制吗?",
-//                "read-timeout 的默认值是多少?",
-//                "Redis 连接池 max-active 的默认值是多少?",
-//                "服务支持灰度发布吗?",
-//                "max-active 最大能配到多少?",
-//                "明天的天气怎么样?",
-//                "如何把超时时间改成 1 小时?",
-//                "登录接口支持 1000 次/分钟的限流吗?",
-//                "短信验证码收不到时,可以引导用户用什么替代方案?",
-//                "登录接口的限流能不能调大?",
-//                "数据库连接池 maximum-pool-size 能配到多少?",
-//                "服务支持暗黑模式或夜间模式吗?",
-//                "缓存 user-info 的 ttl 默认是 30 分钟吗?",
-//                "把 read-timeout 调到 10 分钟可以吗?",
-//                "密码连续错 3 次会锁定账号吗?",
-//                "Redis 连接池 max-active 默认是 100 吗?"
-//        );
-        List<String> questions = List.of(
-                "我叫老张,记住这个名字",
-                "我叫什么?",
-                "登录接口的限流是多少?",
-                "那密码错误呢?"
-        );
 
-        for (String question : questions) {
-            String answer = answerService.answer(question);
-            log.info("{} → 回答是: {}", question, answer);
+//        // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
+//        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore, "repl", queryRewriter, chatMemory);
+//        List<String> questions = List.of(
+//                "我叫老张,记住这个名字",
+//                "我叫什么?",
+//                "登录接口的限流是多少?",
+//                "那密码错误呢?"
+//        );
+//
+//        for (String question : questions) {
+//            String answer = answerService.answer(question);
+//            log.info("{} → 回答是: {}", question, answer);
+//        }
+
+        DocQaTools docQaTools = new DocQaTools(retriever, minScore);
+
+        for (String q : List.of(
+                "登录接口的限流是多少?",                    // 该调工具
+                "你好,你是谁?",                            // 不该调
+                "登录限流和密码锁定策略,哪个更严格?")) {     // 多跳,可能连查两次
+            String a = agenticClient.prompt()
+                    .system(AnswerService.SYSTEM_TEMPLATE)
+                    .user(q)
+                    .tools(docQaTools)
+                    .call()
+                    .content();
+            log.info("[agentic] {} → {}", q, a);
         }
     }
 

@@ -48,10 +48,15 @@ public class DocQaConfig {
 		return new QueryRewriter(chatModel, chatMemory);
 	}
 
-	@Bean
+	@Bean(name = "chatClient")
 	ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory) {
 		return ChatClient.builder(chatModel)
 				.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
 				.build();
+	}
+
+	@Bean(name = "agenticClient")
+	ChatClient agenticClient(ChatModel chatModel){
+		return ChatClient.builder(chatModel).build();
 	}
 }
