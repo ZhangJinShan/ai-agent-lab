@@ -4642,21 +4642,21 @@ for node in response.source_nodes:
 
 #### 5.3 周自检(20 分钟,诚实回答)
 
-- [ ] `@Tool` 方法和 lab02 `Tool` record 的四个要素(name/description/schema/handler)一一对得上吗?哪个要素框架没替你做?
-- [ ] 固定管线和 agentic RAG 的适用场景,能不能不看表说出两条?
-- [ ] 对照表的「行为差异」列,哪几条是你实验跑出来的、哪几条是抄文档的?(抄的那几条删掉重填)
-- [ ] 今天 LlamaIndex 的检索差异归因,能不能一句话讲给同事听?
+- [x] `@Tool` 方法和 lab02 `Tool` record 的四个要素(name/description/schema/handler)一一对得上吗?哪个要素框架没替你做?
+- [x] 固定管线和 agentic RAG 的适用场景,能不能不看表说出两条?
+- [x] 对照表的「行为差异」列,哪几条是你实验跑出来的、哪几条是抄文档的?(抄的那几条删掉重填)
+- [x] 今天 LlamaIndex 的检索差异归因,能不能一句话讲给同事听?
 
 #### 5.4 收尾
 
-- [ ] 进度日志:附录 C 填 W7 一行
-- [ ] git 提交:`git add -A && git commit -m "W7D5: LlamaIndex 对照 + README + 周自检"`
+- [x] 进度日志:附录 C 填 W7 一行
+- [x] git 提交:`git add -A && git commit -m "W7D5: LlamaIndex 对照 + README + 周自检"`
 
 **Day 5 打卡项**:
 
-- [ ] LlamaIndex 跑通,检索差异归因写进 README
-- [ ] 对照表 + A/B 对比摘要进 README
-- [ ] 周自检 4 条诚实过关
+- [x] LlamaIndex 跑通,检索差异归因写进 README
+- [x] 对照表 + A/B 对比摘要进 README
+- [x] 周自检 4 条诚实过关
 
 ---
 
