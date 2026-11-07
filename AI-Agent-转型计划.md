@@ -4329,11 +4329,11 @@ for node in response.source_nodes:   # 对照你的 RetrievedChunk
 
 ### 今天要干什么(每天约 2 小时,共 5 天)
 
-- [ ] **Day 1**:ChatClient 深入 —— system/user 拆分 + 采样参数(对照 lab03 AgentConfig)
-- [ ] **Day 2**:ChatMemory 多轮记忆 + QueryRewriter 落地(对照 lab03 ConversationMemory;W6 扩展 E2 收租)
-- [ ] **Day 3**:@Tool 把检索包成工具 —— agentic RAG(对照 lab02 run() 循环,本周心脏)
-- [ ] **Day 4**:「手写 vs Spring AI」对照表 + 行为对比实验
-- [ ] **Day 5**:Python 对照(LlamaIndex)+ README + 周自检
+- [x] **Day 1**:ChatClient 深入 —— system/user 拆分 + 采样参数(对照 lab03 AgentConfig)
+- [x] **Day 2**:ChatMemory 多轮记忆 + QueryRewriter 落地(对照 lab03 ConversationMemory;W6 扩展 E2 收租)
+- [x] **Day 3**:@Tool 把检索包成工具 —— agentic RAG(对照 lab02 run() 循环,本周心脏)
+- [x] **Day 4**:「手写 vs Spring AI」对照表 + 行为对比实验
+- [x] **Day 5**:Python 对照(LlamaIndex)+ README + 周自检
 
 **本周工程结构增量**:
 
@@ -4606,9 +4606,9 @@ TODO 自己填:把对话接进 REPL 入口(Day 4 正式做 CLI,今天先在 main
 
 **Day 4 打卡项**:
 
-- [ ] A/B 对比表(题 → 两版行为 → 差异归因)记录归档
-- [ ] 对照表四行「行为差异」列填满,每行含「框架没帮你做的事」
-- [ ] git 提交:`git add -A && git commit -m "W7D4: 手写 vs Spring AI 对照表 + 行为对比"`
+- [x] A/B 对比表(题 → 两版行为 → 差异归因)记录归档
+- [x] 对照表四行「行为差异」列填满,每行含「框架没帮你做的事」
+- [x] git 提交:`git add -A && git commit -m "W7D4: 手写 vs Spring AI 对照表 + 行为对比"`
 
 ---
 

@@ -33,7 +33,7 @@ public class DocQaTools {
      * 工具是什么 / 返回什么：查询团队文档知识库(接口文档、配置说明、故障手册)，返回代来源和相似度分数的片段
      * 什么时候该调：当问题涉及接口行为、配置项默认值或范围，错误码、故障处理步骤时使用
      * 什么时候不调：闲聊、常识问答、身份介绍等与团队文档无关的问题直接作答，不要调用工具
-     * 可多次调用: 问题设计多个不同主题或需要对比时，可用不同关键词分别检索多次，再综合回答
+     * 可多次调用: 问题涉及多个不同主题或需要对比时，可用不同关键词分别检索多次，再综合回答
      * 保留话术: 输入检索关键词或完整问题,保留原问题中的配置项名和错误码,不要同义替换
      * 参数怎么填：检索关键词或完整问句; 对比类问题每次只传一个主题;保留 max-active、read-timeout、USER_LOCKED 等原始术语, 不要改写成中文描述
      * @param query: 查询参数
@@ -42,7 +42,7 @@ public class DocQaTools {
     @Tool(description = "查询团队文档知识库(接口文档、配置说明、故障手册)，返回代来源和相似度分数的片段。" +
             "当问题涉及接口行为、配置项默认值或范围，错误码、故障处理步骤时使用; " +
             "闲聊、常识问答、身份介绍等与团队文档无关的问题直接作答，不要调用工具; " +
-            "问题设计多个不同主题或需要对比时，可用不同关键词分别检索多次，再综合回答; " +
+            "问题涉及多个不同主题或需要对比时，可用不同关键词分别检索多次，再综合回答; " +
             "输入检索关键词或完整问题,保留原问题中的配置项名和错误码,不要同义替换")
     public String searchDocs(@ToolParam(description = "检索关键词或完整问句; 对比类问题每次只传一个主题; " +
             "保留 max-active、read-timeout、USER_LOCKED 等原始术语, 不要改写成中文描述") String query){
@@ -52,7 +52,6 @@ public class DocQaTools {
                 log.info("searchDocs 无相关内容: query={}", query);
                 return "知识库中没有相关内容";
             }
-
             log.info("searchDocs 命中 {} 块: query={}, top_1.score={}", chunks.size(), query, chunks.get(0).score());
             return Fragments.format(chunks);
         } catch (Exception e) {

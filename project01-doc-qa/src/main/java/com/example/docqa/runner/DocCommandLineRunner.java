@@ -74,6 +74,37 @@ public class DocCommandLineRunner implements CommandLineRunner {
 
     @Override
     public void run(@NotNull String... args) throws Exception {
+
+        Retriever retriever = initRetriever();
+
+        // 路径 A
+        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore, "w7d4-A", queryRewriter, chatMemory);
+
+        // 路径 B
+        DocQaTools docQaTools = new DocQaTools(retriever, minScore);
+
+        List<String> questions = List.of(
+                "你好,你是谁?",
+                "登录接口的限流是多少?",
+                "登录限流和密码锁定策略,哪个更严格?",
+                "明天的天气怎么样?"
+        );
+
+        for (String q : questions) {
+            String a = answerService.answer(q);
+            log.info("[A] {} → {}", q, a);
+
+            String b = agenticClient.prompt()
+                    .system(AnswerService.SYSTEM_TEMPLATE)   // 同样的 system 规则,控制变量
+                    .user(q)
+                    .tools(docQaTools)
+                    .call().content();
+            log.info("[B] {} → {}", q, b);
+        }
+    }
+
+
+    private Retriever initRetriever() throws Exception {
         // 加载文档
         List<Document> docs = loader.loadAll();
         log.info("Loaded {} documents", docs.size());
@@ -99,37 +130,9 @@ public class DocCommandLineRunner implements CommandLineRunner {
         vectorStore.add(springDocs);
 
         // 初始化检索器
-        Retriever retriever = new Retriever(vectorStore, topK);
-
-//        // ⑥ 问答演示(Day 2):检索 → 拼引用片段 → 调 chat → 带引用回答
-//        AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(chatClient), minScore, "repl", queryRewriter, chatMemory);
-//        List<String> questions = List.of(
-//                "我叫老张,记住这个名字",
-//                "我叫什么?",
-//                "登录接口的限流是多少?",
-//                "那密码错误呢?"
-//        );
-//
-//        for (String question : questions) {
-//            String answer = answerService.answer(question);
-//            log.info("{} → 回答是: {}", question, answer);
-//        }
-
-        DocQaTools docQaTools = new DocQaTools(retriever, minScore);
-
-        for (String q : List.of(
-                "登录接口的限流是多少?",                    // 该调工具
-                "你好,你是谁?",                            // 不该调
-                "登录限流和密码锁定策略,哪个更严格?")) {     // 多跳,可能连查两次
-            String a = agenticClient.prompt()
-                    .system(AnswerService.SYSTEM_TEMPLATE)
-                    .user(q)
-                    .tools(docQaTools)
-                    .call()
-                    .content();
-            log.info("[agentic] {} → {}", q, a);
-        }
+        return new Retriever(vectorStore, topK);
     }
+
 
     private org.springframework.ai.document.Document toSpringDoc(Chunk chunk) {
         // source/heading/chunkIndex 进 metadata —— 第 6 周引用标注靠它,别漏
