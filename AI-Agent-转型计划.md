@@ -4873,31 +4873,112 @@ public record JudgeVerdict(int score, String reason, String rawResponse) {}
 ```
 
 ```java
-package com.example.docqa.eval;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-/**
- * LLM 裁判:按 expected 判 0/1 + 理由。核心链路,手写。
- */
-public class AnswerJudge {
-
-    private final /* ChatClient 或你的 AnswerGenerator 同款聊天依赖 */ chat;
-    private final ObjectMapper mapper = new ObjectMapper();
-
-    // TODO: 构造注入
-
     public JudgeVerdict judge(EvalQuestion question, String actual) {
-        // TODO 1: 拼 judge prompt(2.2 的模板,填 question/expected/actual)
-        // TODO 2: 调 chat —— temperature 必须 0!能开 json_object 就开(W1D4 的经验)
-        // TODO 3: 解析 {"score":..,"reason":..}
-        //         - score 只认 0/1,其他值视为解析失败
-        //         - 解析失败 → 重试 1 次(extractJson 的老经验,把上次的坏输出拼进提示)
-        // TODO 4: 再失败 → 抛 JudgeException(带 rawResponse),
-        //         由 EvalRunner 计数 judge_error —— 绝不返回默认分!
+        // 1. 拼 judge prompt:system 是固定常量,只有 user 侧三段数据需要每题渲染
+        String userPrompt = new PromptTemplate(JUDGE_USER_PROMPT).render(Map.of(
+                "question", question.question(),
+                "expected", question.expected(),
+                "actual", actual == null ? "" : actual));
+        log.info("user prompt is {}", userPrompt);
+
+        // 2. 第一次调用 + 解析
+        String raw = callJudge(JUDGE_SYSTEM_PROMPT, userPrompt);
+        log.info("judge content:\n{}", raw);
+        JudgeVerdict verdict = parse(raw);
+        if (verdict != null) {
+            return verdict;
+        }
+
+        // 3. 解析失败 → 重试 1 次:system 不动,只把上次的坏输出拼进 user(W1D4 extractJson 老经验)
+        log.warn("judge 输出解析失败,带坏输出重试 1 次,原始输出:\n{}", raw);
+        String retryUserPrompt = userPrompt + "\n\n你上一次的输出:\n" + raw
+                + "\n\n它不是合法的判分 JSON(或 score 不是 0/1、reason 为空)。请重新判分,"
+                + "只输出一个 JSON 对象,不要任何其他文字、不要 Markdown 围栏。";
+        String retryRaw = callJudge(JUDGE_SYSTEM_PROMPT, retryUserPrompt);
+        log.info("judge retry content:\n{}", retryRaw);
+
+        verdict = parse(retryRaw);
+        if (verdict != null) {
+            return verdict;
+        }
+
+        // 4. 再失败 → 抛,绝不返回默认分;EvalRunner catch 后计数 judge_error(2.1 纪律)
+        throw new JudgeException("judge 输出解析失败(已重试 1 次)", retryRaw, null);
     }
-}
+
+    /** 一次 chat 调用:system / options 固定,只有 user 变;chat 自身异常也统一成 JudgeException */
+    private String callJudge(String systemPrompt, String userPrompt) {
+        try {
+            String content = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .options(ChatOptions.builder().temperature(0.0))
+                    .call().content();
+            if (content == null || content.isBlank()) {
+                throw new JudgeException("judge 返回空内容", content, null);
+            }
+            return content;
+        } catch (JudgeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JudgeException("judge chat 调用失败", null, e);
+        }
+    }
+
+    /**
+     * 解析 {"score":0|1,"reason":"..."}。
+     * 返回 null = 解析失败(交给上层重试),不是判 0 —— 混进指标的错误判分比缺失的判分更危险。
+     * 失败判据:坏 JSON / score 非整数 / score 不是 0 或 1 / reason 缺失或空白(2.1:没有理由的判分无法审计)。
+     */
+    private JudgeVerdict parse(String raw) {
+        try {
+            JsonNode node = objectMapper.readTree(extractJson(raw));
+            if (node == null || !node.isObject()) {
+                return null;
+            }
+            JsonNode scoreNode = node.get("score");
+            JsonNode reasonNode = node.get("reason");
+            if (scoreNode == null || !scoreNode.isIntegralNumber()) {
+                return null;
+            }
+            int score = scoreNode.intValue();
+            if (score != 0 && score != 1) {
+                return null;
+            }
+            if (reasonNode == null || !reasonNode.isTextual() || reasonNode.asText().isBlank()) {
+                return null;
+            }
+            // rawResponse 留原始输出(可能带围栏/解释),判分要可审计
+            return new JudgeVerdict(score, reasonNode.asText().trim(), raw);
+        } catch (Exception e) {
+            log.debug("judge JSON 解析失败", e);
+            return null;
+        }
+    }
+
+    /**
+     * 文本清理:剥 ```json 围栏 + 从第一个 { 到最后一个 } 抠出对象(2.5 卡点)。
+     * 只做清理不做语义猜测,抠不出来就原样返回,让 readTree 去判失败。
+     * lastIndexOf('}') 是宽松匹配:JSON 后面若跟着含 } 的解释会被一起吞进去 → 解析失败 → 走重试,不会误判分。
+     */
+    private static String extractJson(String raw) {
+        String text = raw.trim();
+        if (text.startsWith("```")) {
+            int firstNewline = text.indexOf('\n');
+            if (firstNewline > 0) {
+                text = text.substring(firstNewline + 1);
+            }
+            int fenceEnd = text.lastIndexOf("```");
+            if (fenceEnd >= 0) {
+                text = text.substring(0, fenceEnd);
+            }
+        }
+        text = text.trim();
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        return (start >= 0 && end > start) ? text.substring(start, end + 1) : text;
+    }
+
 ```
 
 ```java
