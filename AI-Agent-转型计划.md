@@ -4660,6 +4660,578 @@ for node in response.source_nodes:
 
 ---
 
+## 第 8 周:评估体系(项目含金量的一半在这里)
+
+**本周成果:一套可复跑的评估流水线 + 一组基线数字。** 为什么说「一半含金量」:第 9 周的每个优化决策(切块大小 / k 值 / prompt)都要和基线比,没有评估的优化是自嗨;而简历上「回答正确率从 X% 优化到 Y%」那行数字,起点就是本周的 baseline.md。
+
+### 今天要干什么(每天约 2~2.5 小时,共 5 天)
+
+- [ ] **Day 1**:评估集 —— dataset.jsonl 补到 50 题(+ `cite` 字段改造)
+- [ ] **Day 2**:EvalRunner + LLM Judge —— 回答正确率
+- [ ] **Day 3**:引用准确率 + 拒答正确率 —— 规则型指标
+- [ ] **Day 4**:跑批两遍 + baseline.md —— 基线与失败样本分析
+- [ ] **Day 5**:评估器测试 + README + 周自检
+
+**本周工程结构增量**(Day 1 建):
+
+```
+project01-doc-qa/
+├── eval/
+│   ├── dataset.jsonl          ← Day 1:50 题(现有 18 题补 cite 并扩充)
+│   ├── eval-result.md         ← 已有(W6 手动验收),保留作对照
+│   ├── results-run1.md        ← Day 2 起:每次跑批的逐题留档
+│   └── baseline.md            ← Day 4:基线数字(第 9 周的比较基准)
+└── src/main/java/com/example/docqa/eval/
+    ├── EvalQuestion.java      ← Day 1:题目记录
+    ├── DatasetLoader.java     ← Day 1:jsonl 加载(坏数据早炸)
+    ├── JudgeVerdict.java      ← Day 2:judge 判分结果
+    ├── AnswerJudge.java       ← Day 2:LLM 裁判(核心链路,手敲)
+    ├── CitationChecker.java   ← Day 3:引用准确率(规则判定)
+    ├── Metrics.java           ← Day 3:三指标汇总(分子分母是「法律文本」)
+    └── EvalRunner.java        ← Day 4:跑批主流程
+```
+
+> **铁律提醒**:评估是三大核心链路的最后一块(切块/检索/评估)——**指标定义、judge prompt、判分逻辑必须手写**。评估器写得好不好,直接决定你报告上的数字可不可信——数字不可信,整个项目就不可信。
+
+---
+
+### Day 1:评估集 —— 补到 50 题(约 2 小时)
+
+**评估集是评估的根。** 目标:dataset.jsonl 从 18 题扩到 **50 题**,三类配比约各 1/3;每题 expected 写成**判分细则**;并给 schema 加一个机器可判的 `cite` 字段。
+
+#### 1.1 先想清楚:一道题的解剖
+
+```
+{"id": 1, "question": "登录接口的限流是多少?",
+ "expected": "应引用 接口文档.md#登录接口,提到 100 次/分钟",
+ "type": "factual", "cite": "接口文档.md#登录接口"}
+```
+
+| 字段       | 给谁看            | 作用                                 |
+| -------- | -------------- | ---------------------------------- |
+| question | 检索 + 回答        | 被评估的输入                             |
+| expected | **LLM judge**  | 判分细则——judge 只按它判 0/1               |
+| type     | 规则代码           | factual/ abstain / trap,决定走哪个指标的判定 |
+| cite     | **规则代码**(今天新加) | 期望引用的出处,引用准确率机器比对用                 |
+
+> `factual`(有答案)、`abstain`(该拒答)、`trap`(文档有相关但问题里的说法是错的,期望纠错)
+
+**为什么要加 cite**:expected 是给人和 judge 看的自由文本,「应引用 接口文档.md#登录接口」机器没法可靠抠;引用准确率要批量算,必须有结构化字段。这是今天最重要的 schema 决策。
+
+#### 1.2 三类题型的出题方法论(30 分钟)
+
+**factual(有答案,约 1/3)**:从 docs 的事实点**反向出题**——先把三篇文档的事实点列成清单(限流数字、锁定策略、超时默认值、连接池参数……),每个事实变 1~2 个问句。同一个事实换不同问法(「限流多少」/「一分钟能登录几次」)是有意为之:考察检索对措辞的鲁棒性。
+
+**abstain(该拒答,约 1/3)**:三个来源——① 文档完全没提(灰度发布);② 文档说了一半(max-active 只有默认值,问上限);③ 问一个不存在的配置项。**每个 abstain 题的 expected 统一写「文档中没有相关内容」**,和拒答文案一字不差。
+
+**trap(纠错题,约 1/3)**:问题里埋一个**和文档矛盾的说法**(「超时改成 1 小时」),expected 要求:指出文档真实说法 + 引用出处 + 不顺着错误前提走。trap 是三类里最难的——它同时考检索、考 grounding、考引用。
+
+三条避坑:① 别出「答案就在问题里」的送分题;② 别让两题的答案互相泄漏上下文;③ expected 写成判分细则(「应引用 xx,提到 yy」),不写「答对就行」——judge 是照它判的,细则含糊 = 放水。
+
+#### 1.3 DatasetLoader 代码(对照写,核心思路是「坏数据早炸」)
+
+```java
+package com.example.docqa.eval;
+
+/**
+ * 一道评估题。
+ * cite = 期望引用的出处("接口文档.md#登录接口");abstain 题为 null。
+ */
+public record EvalQuestion(int id, String question, String expected, String type, String cite) {
+
+    public boolean isAbstain() {
+        return "abstain".equals(type);
+    }
+}
+```
+
+```java
+package com.example.docqa.eval;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+/**
+ * dataset.jsonl 加载:一行一题。
+ * 评估集是评估的根 —— 坏数据必须早炸,宁可炸在加载,不炸在跑批中途(炸在中途=白跑半小时)。
+ */
+public class DatasetLoader {
+
+    private static final Set<String> LEGAL_TYPES = Set.of("factual", "abstain", "trap");
+
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public List<EvalQuestion> load(Path jsonl) throws IOException {
+        if (!Files.isRegularFile(jsonl)) {
+            throw new IllegalArgumentException("数据集不存在: " + jsonl.toAbsolutePath());
+        }
+        List<EvalQuestion> questions = new ArrayList<>();
+        Set<Integer> seenIds = new HashSet<>();
+        List<String> lines = Files.readAllLines(jsonl);   // UTF-8 默认
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            if (line.isEmpty()) {
+                continue;                                   // 空行跳过
+            }
+            EvalQuestion q;
+            try {
+                q = mapper.readValue(line, EvalQuestion.class);
+            } catch (Exception e) {
+                // 坏行 → 报错带行号(不静默跳过!评估集里藏坏题 = 指标悄悄失真)
+                throw new IllegalArgumentException(
+                        "数据集第 " + (i + 1) + " 行解析失败: " + e.getMessage(), e);
+            }
+            if (!seenIds.add(q.id())) {
+                throw new IllegalArgumentException("数据集 id 重复: " + q.id());
+            }
+            if (!LEGAL_TYPES.contains(q.type())) {
+                throw new IllegalArgumentException(
+                        "第 " + q.id() + " 题 type 非法: " + q.type());
+            }
+            questions.add(q);
+        }
+        return questions;
+    }
+}
+```
+
+> 注释三类的用武之地:「炸在加载不炸在中途」是决策记录,「不静默跳过」是坑位警报。这个类还欠一个校验想一想:**abstain 题的 cite 应该是 null、factual/trap 的 cite 应该非空**——加进 load(),这是今天的思考作业。
+
+#### 1.4 验证(15 分钟)
+
+1. 跑 load(),打印:总题数 50、三类各自计数(factual/abstain/trap ≈ 17/17/16,允许小偏差)
+2. **抽查 5 条 expected**,问自己:「拿着这条细则,我能给任意回答打 0/1 吗?」——不能的重写
+3. 故意往 jsonl 里丢一行坏 JSON → 确认报错带行号 → 删掉
+
+#### 1.5 常见卡点
+
+| 现象                      | 原因 / 解法                                  |
+| ----------------------- | ---------------------------------------- |
+| 凑不满 50 题                | 对 docs 还不够熟——回去把三篇文档再精读一遍,事实点清单列到 25 个以上,题自然就来了 |
+| expected 写得太宽(「提到限流即可」) | judge 会放水;要写到「提到 100 次/分钟 + 引用出处」的粒度     |
+| 一题有多个可引用出处              | cite 先只放**最主要**的那个;判定时 heading 宽松匹配(contains),别为多出处设计复杂 schema |
+| abstain 题越出越像脑筋急转弯      | 别出「文档里没有的生僻知识」,要出「用户真的会问的」——真实感是评估可信度的一部分 |
+
+**Day 1 打卡项**:
+
+- [ ] dataset.jsonl 50 题,三类配比合理,全部带 cite(abstain 除外)
+- [ ] `EvalQuestion` + `DatasetLoader` 完成,含 id 唯一 / type 合法 / cite 与 type 匹配三重校验
+- [ ] 坏行报错带行号,实际触发验证过
+- [ ] 抽查 5 条 expected 能判分
+- [ ] git 提交:`git add -A && git commit -m "W8D1: 评估集 50 题 + DatasetLoader"`
+
+---
+
+### Day 2:EvalRunner + LLM Judge —— 回答正确率(约 2.5 小时)
+
+**今天让 LLM 当裁判,并让裁判可信。** 目标:逐题跑 `AnswerService.answer()` → LLM judge 按 expected 判 0/1 + 理由 → 汇总「回答正确率」。
+
+#### 2.1 先想清楚:LLM 当裁判的三个可信度支柱
+
+「LLM 评 LLM」听起来像以毒攻毒,做对三件事它就是可靠的工程手段:
+
+1. **temperature = 0**:判分要可复现,不要「同一个回答判两次两个分」
+2. **expected 是判分细则**:judge 不发挥、不看「文笔」,只对细则核对——这是 W6 出题就在铺垫的事
+3. **输出严格 JSON + 理由留档**:0/1 机器可汇总,理由给人抽查——**没有理由的判分无法审计**
+
+外加一条纪律:**judge 判分失败(解析不了)绝不悄悄算 0 或 1**——单独计数 `judge_error`,报告里可见。混进指标里的错误判分比缺失的判分更危险。
+
+#### 2.2 judge prompt(完整底稿,自己调)
+
+```
+你是评估裁判。给你一个问题、判分细则、系统的实际回答,严格按细则判 0 或 1。
+
+问题:{question}
+判分细则:{expected}
+实际回答:{actual}
+
+判分规则:
+1. 只按判分细则判分:细则没提的优点不加分,细则没提的缺点不扣分
+2. 细则要求的引用出处缺失或标错 → 判 0
+3. 细则要求的事实点缺失或错误 → 判 0
+4. 细则为「文档中没有相关内容」的题:回答必须是明确拒答;任何编造、推测、"可能是" → 判 0
+5. 只输出一个 JSON 对象,不要任何其他文字:
+{"score": 1, "reason": "一句话理由"}
+```
+
+规则 1 是防 judge 心慈手软的关键;规则 4 把 abstain 的判法写死(和 W6D3 的拒答文案约定呼应)。**judge prompt 是本项目第三个 prompt 工程对象**(回答模板、查询改写、judge)——它的调参痕迹同样要留注释。
+
+#### 2.3 代码(对照写)
+
+```java
+package com.example.docqa.eval;
+
+/**
+ * judge 的判分结果。rawResponse 留档 —— 判分要可审计。
+ */
+public record JudgeVerdict(int score, String reason, String rawResponse) {}
+```
+
+```java
+package com.example.docqa.eval;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+/**
+ * LLM 裁判:按 expected 判 0/1 + 理由。核心链路,手写。
+ */
+public class AnswerJudge {
+
+    private final /* ChatClient 或你的 AnswerGenerator 同款聊天依赖 */ chat;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    // TODO: 构造注入
+
+    public JudgeVerdict judge(EvalQuestion question, String actual) {
+        // TODO 1: 拼 judge prompt(2.2 的模板,填 question/expected/actual)
+        // TODO 2: 调 chat —— temperature 必须 0!能开 json_object 就开(W1D4 的经验)
+        // TODO 3: 解析 {"score":..,"reason":..}
+        //         - score 只认 0/1,其他值视为解析失败
+        //         - 解析失败 → 重试 1 次(extractJson 的老经验,把上次的坏输出拼进提示)
+        // TODO 4: 再失败 → 抛 JudgeException(带 rawResponse),
+        //         由 EvalRunner 计数 judge_error —— 绝不返回默认分!
+    }
+}
+```
+
+```java
+package com.example.docqa.eval;
+
+import com.example.docqa.qa.AnswerService;
+
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * 评估跑批:逐题 回答 → 判分 → 汇总。今天先跑通「回答正确率」一个指标。
+ */
+public class EvalRunner {
+
+    private final AnswerService answerService;
+    private final AnswerJudge judge;
+    private final DatasetLoader loader = new DatasetLoader();
+
+    // TODO: 构造注入
+
+    public void run(Path datasetPath) throws Exception {
+        List<EvalQuestion> questions = loader.load(datasetPath);
+
+        int correct = 0;
+        int judgeErrors = 0;
+        StringBuilder archive = new StringBuilder();   // 逐题留档 → results-run1.md
+
+        for (EvalQuestion q : questions) {
+            // TODO 1: actual = answerService.answer(q.question())
+            // TODO 2: verdict = judge.judge(q, actual);catch JudgeException → judgeErrors++,继续
+            // TODO 3: 累加 correct;每题一行留档:
+            //         id / type / score / reason / question / actual(截断到 200 字)
+            // TODO 4: 进度打印(第 10/50 题……)—— 跑批要跑十几分钟,没进度会以为死了
+        }
+
+        // TODO 5: 汇总打印:回答正确率 = correct / 有效题数(judge_error 的题不算分母?
+        //         想清楚:建议分母用全部题,judge_error 单列——缺失的判分要看得见)
+    }
+}
+```
+
+两个工程细节:① 50 题 × (回答 + 判分) ≈ **100 次 chat 调用**,十几分钟 + 真实费用,跑之前心里有数;② 单题失败(回答抛异常/judge 抛异常)不中断整批——记错误继续,最后统一汇总(批量任务的铁规矩,W5D3 的哲学)。
+
+#### 2.4 验证(15 分钟)
+
+先拿 **5 题的小数据集**跑通全链路(留档文件、进度、汇总都对),再上 50 题。留档 `results-run1.md` 里随机抽 3 条 judge 的 reason 对照 expected 读一遍——**这是人工抽查的第一次演练**。
+
+#### 2.5 常见卡点
+
+| 现象                           | 原因 / 解法                                  |
+| ---------------------------- | ---------------------------------------- |
+| judge 输出不是 JSON(带解释文字)       | json_object 没开/模型不守规矩:prompt 里「只输出一个 JSON 对象」+ 解析前剥 ``` 围栏 + 重试 1 次 |
+| judge 大部分判 1,好得可疑            | 心慈手软:规则 1 没进 prompt,或 expected 写太宽——回 Day 1 改细则,别改 judge |
+| 同一回答两次判分不同                   | temperature 没设 0;或用了 reasoning 模型(采样参数被忽略) |
+| abstain 题被 judge 判 1(实际回答编了) | 规则 4 没生效;在 prompt 里把细则为「文档中没有相关内容」的判法加粗前置 |
+
+**Day 2 打卡项**:
+
+- [ ] `AnswerJudge` 完成:temperature=0、JSON 输出、解析失败重试、JudgeException 不静默
+- [ ] `EvalRunner` 跑通 5 题小集,逐题留档(id/type/score/reason/actual)
+- [ ] judge_error 单独计数,分母处理写清注释
+- [ ] 人工抽查 3 条 judge 判分,和 expected 对得上
+- [ ] git 提交:`git add -A && git commit -m "W8D2: EvalRunner + LLM Judge(回答正确率)"`
+
+---
+
+### Day 3:引用准确率 + 拒答正确率 —— 规则型指标(约 2 小时)
+
+**今天补上另外两个指标,而且不用 LLM。** 引用和拒答都有明确规则——规则能判的绝不上 LLM(便宜、确定、可解释;和 W6D4 测试分层同款哲学)。
+
+#### 3.1 三个指标的定义(先立「法律文本」,再写代码)
+
+指标的分子分母是评估报告的法律文本,定义含糊 = 数字没意义。定稿如下(写进 `Metrics` 的 javadoc):
+
+| 指标    | 分子                             | 分母                             |
+| ----- | ------------------------------ | ------------------------------ |
+| 回答正确率 | judge score=1 的题数              | 全部题数(judge_error 单列,不吞)        |
+| 引用准确率 | cite 命中的题数                     | **有 cite 的题数**(factual + trap) |
+| 拒答正确率 | abstain 题拒答数 + 非 abstain 题未拒答数 | 全部题数                           |
+
+拒答正确率要拆两个子数进报告:**abstain 拒答率**(该拒的拒了多少)和**误拒率**(不该拒的被拒了多少)——一个数字看不出是「不敢答」还是「乱答」。
+
+#### 3.2 CitationChecker 代码(对照写)
+
+```java
+package com.example.docqa.eval;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * 引用准确率判定(规则型,不用 LLM)。
+ */
+public class CitationChecker {
+
+    /** 回答模板约定的引用格式:[来源:文件#标题] —— 抽取用 */
+    private static final Pattern CITATION = Pattern.compile("\\[来源:([^#\\]]+)#([^\\]]*)\\]");
+
+    public record Citation(String source, String heading) {}
+
+    /** 抽取回答里所有引用标注 */
+    public List<Citation> extract(String answer) {
+        List<Citation> result = new ArrayList<>();
+        Matcher m = CITATION.matcher(answer);
+        while (m.find()) {
+            result.add(new Citation(m.group(1).trim(), m.group(2).trim()));
+        }
+        return result;
+    }
+
+    /**
+     * 引用准确:回答的引用里命中了期望出处。
+     * 松紧度(这是「引用准确率」的定义,记进 README):
+     *   source 必须精确相等;heading 宽松匹配(contains)——
+     *   模型可能写 "#登录接口(注意事项)",严格相等会冤枉它。
+     */
+    public boolean isAccurate(String answer, String expectedCite) {
+        // TODO:
+        // 1. expectedCite 判空:该题不要求引用 → 按 true 还是抛?想清楚写注释
+        //    (建议:cite 为 null 的题不参与本指标 —— 分母已在 Metrics 处理,这里防御式 true)
+        // 2. expectedCite 拆成 source + heading
+        // 3. 遍历 extract(answer):source 相等 && (heading空 || 实际 heading contains 期望 heading)→ true
+        // 4. 都没命中 → false
+    }
+}
+```
+
+#### 3.3 拒答判定 + Metrics(对照写)
+
+```java
+package com.example.docqa.eval;
+
+import java.util.List;
+
+/**
+ * 三指标汇总。分子分母的定义见类注释 —— 这是评估报告的法律文本。
+ */
+public class Metrics {
+
+    /** 拒答判据:回答含约定拒答文案(W6D3 统一过的那句)→ 算拒答。
+     *  模型偶尔换说法(「根据现有文档无法回答」)也算拒答的话,加进集合并写注释。 */
+    private static final String ABSTAIN_TEXT = "文档中没有相关内容";
+
+    public static boolean isAbstainAnswer(String answer) {
+        // TODO: 判定逻辑(contains?还是集合匹配多个变体?选一个写注释)
+    }
+
+    /** 计算三指标(输入:每题的判定结果列表) */
+    public static Report summarize(List<ItemResult> items) {
+        // TODO: 按 3.1 的定义算;注意:
+        //   - 引用准确率分母可能为 0(全是 abstain)→ 除零防御,返回 N/A
+        //   - 拒答正确率拆两个子数(abstain 拒答率 / 误拒率)一起放进 Report
+    }
+
+    /** 一题的判定结果(跑批时逐题填) */
+    public record ItemResult(int id, String type, int judgeScore, boolean judgeError,
+                             boolean citeHit, boolean citeRequired, boolean abstained) {}
+
+    /** 指标报告(打印和 baseline.md 共用) */
+    public record Report(double answerAccuracy, double citationAccuracy,
+                         double abstainAccuracy, double abstainRecall, double falseAbstainRate,
+                         int judgeErrors) {}
+}
+```
+
+#### 3.4 接进 EvalRunner
+
+每题判完 judge 后顺手算:citeHit(有 cite 的题)、abstained(全部题),填 `ItemResult`;最后 `Metrics.summarize(...)` 打印三指标 + 子数。跑一遍 5 题小集对拍手算——**指标计算必须和你的手算对上**,这是 Day 5 测试的预演。
+
+#### 3.5 常见卡点
+
+| 现象              | 原因 / 解法                                  |
+| --------------- | ---------------------------------------- |
+| 引用正则一个都抽不到      | 模型没按 `[来源:xx#yy]` 格式写——先打印几条 actual 看真实格式,再决定:改模板约束 / 放宽正则,别闷头调正则 |
+| 引用准确率 100% 或 0% | 两个极端都不正常:100% 多半是判定写松了(heading contains 空串恒真!注意 `heading.isEmpty()` 的短路),0% 是 cite 字段没填对 |
+| 拒答文案变体判不出       | 判据收进集合:`Set.of("文档中没有相关内容", "无法从文档中找到")`——但**别放太宽**,"抱歉"不能算拒答 |
+| 除零异常            | 引用准确率分母 = 有 cite 的题数,防御:分母 0 → 报告里写 N/A 不写 NaN |
+
+**Day 3 打卡项**:
+
+- [ ] `CitationChecker` 完成:抽取 + source 精确 / heading 宽松的命中判定
+- [ ] `Metrics` 三指标 + 拒答两个子数,分子分母定义写进 javadoc
+- [ ] 5 题小集跑出的指标和手算一致
+- [ ] 除零 / judge_error 的边界处理有测试或注释
+- [ ] git 提交:`git add -A && git commit -m "W8D3: 引用准确率 + 拒答正确率(规则型指标)"`
+
+---
+
+### Day 4:跑批两遍 + baseline.md(约 2 小时)
+
+**今天产出项目的第一份、也是最重要的一份数字。** 目标:50 题跑两遍取均值,人工抽查 judge,失败样本打标分析,基线落进 `eval/baseline.md`。
+
+#### 4.1 跑批规程(照做,别省)
+
+1. **跑两遍**(第 1 遍 results-run1.md / 第 2 遍 results-run2.md):temperature=0 也有波动(W3D5 的教训),两遍均值进基线;两遍差距大本身就是重要观察
+2. **人工抽查 10 条 judge 判分**:拿 reason 对照 expected 逐条读——judge 放水是本流程最大的风险,抽查就是质检
+3. **失败样本打标**:score=0 的题 + judge_error 的题,每题标一个**失败模式**:
+
+| 失败模式        | 含义            | 第 9 周的对策指向            |
+| ----------- | ------------- | --------------------- |
+| 检索没命中       | top-1 不是答案所在块 | 切块 / k 值 / 查询改写       |
+| 命中了没答对      | 片段对,回答错/漏     | 回答模板                  |
+| 引用缺失或错      | 答对但没引用/标错出处   | 模板引用约束                |
+| 该拒没拒        | abstain 题编了   | min-score 阈值 / prompt |
+| 不该拒拒了       | 有答案却拒答        | 阈值误杀                  |
+| judge_error | 判分失败          | judge 的 JSON 稳定性      |
+
+#### 4.2 baseline.md 模板(完整,对照填)
+
+```markdown
+# 基线(baseline)
+
+- 日期:
+- 模型:glm-5.3 + qwen3.7-text-embedding-flash(1024 维)
+- 参数:topK=5 / min-score=0.3 / chunk=800/100 / temperature=0
+- 数据集:dataset.jsonl v1(50 题:factual N / abstain N / trap N)
+
+## 三指标(两遍均值)
+| 指标 | 第 1 遍 | 第 2 遍 | 均值 |
+|---|---|---|---|
+| 回答正确率 | | | |
+| 引用准确率 | | | |
+| 拒答正确率 | | | |
+| ↳ abstain 拒答率 | | | |
+| ↳ 误拒率 | | | |
+| judge_error 数 | | | |
+
+## 三类分项
+| 类型 | 题数 | 正确 | 正确率 |
+|---|---|---|---|
+| factual | | | |
+| abstain | | | |
+| trap | | | |
+
+## 失败样本分析(top10,按「可改进性」排)
+| id | 题目 | 失败模式 | 假设原因 |
+|---|---|---|---|
+| | | | |
+
+## 结论与第 9 周假设
+- 失败模式最多的是 ______ → 第 9 周优先试 ______
+- 和 chunking-hypothesis 的呼应:______
+- 两遍波动情况:______(同一批失败 = 系统性问题;不同批 = 模型随机性)
+```
+
+#### 4.3 基线的三个诚实检查
+
+1. **指标好得离谱(>90%)?** 两个嫌疑:题是照埋点出的天然好答;judge 放水。先抽查 judge,再加 3~5 道中等难度题(「文档说了一半」类),宁可基线难看——**基线的意义是被超越,不是被展览**
+2. **两遍差距 >5 个百分点?** 对比两遍的失败样本:同一批题失败 → 系统性问题,查链路;不同批 → 模型随机性,报告里注明波动区间
+3. **judge_error > 0?** 看 rawResponse 找规律(某类题的 actual 特别长?某类 expected 特别绕?)——修 judge 的 JSON 稳定性,重跑
+
+#### 4.4 常见卡点
+
+| 现象                | 原因 / 解法                                  |
+| ----------------- | ---------------------------------------- |
+| 跑批到一半 API 报错      | 单题 catch 继续;已跑的留档就是断点,续跑可人工合并            |
+| 跑完发现数据集有错别字要改     | 改!数据集是根——但改完**两遍都要重跑**,基线不能混两个版本的数据集     |
+| 想把失败样本里「模型随机」的题剔掉 | 不许剔——波动本身就是基线的一部分,第 9 周比较时同样要跑两遍         |
+| 费用心痛              | 50 题 ≈ 100 次调用,gl m 价位下是零头;但养成习惯:跑批前看一眼题数 × 2 |
+
+**Day 4 打卡项**:
+
+- [ ] 50 题 × 2 遍跑完,两遍结果都留档
+- [ ] 人工抽查 10 条 judge 判分,记录抽查结论
+- [ ] 失败样本全部打了失败模式标签,top10 进 baseline.md
+- [ ] `eval/baseline.md` 按模板写完(含结论与第 9 周假设)
+- [ ] git 提交:`git add -A && git commit -m "W8D4: 跑批两遍 + 基线 baseline.md"`
+
+---
+
+### Day 5:评估器测试 + README + 周自检(约 2 小时)
+
+**给评估器本身做质检——假的评估比没有评估更危险。**
+
+#### 5.1 评估器也要被测(35 分钟)
+
+| 测什么                 | 怎么测                      | 用例设计                                     |
+| ------------------- | ------------------------ | ---------------------------------------- |
+| `Metrics.summarize` | 纯逻辑,构造 ItemResult 列表对拍手算 | 4 题小集(2 对 2 错)+ 边界(0 个 cite 题除零、全对、全错)   |
+| `CitationChecker`   | 纯逻辑                      | 标准格式 / heading 走样(`#登录接口(备注)`) / 无引用 / 一答多引 |
+| `AnswerJudge` 解析    | FakeChat 回固定 JSON        | 正常 JSON → 判分对;坏 JSON → 重试后仍坏 → JudgeException 不静默 |
+| `DatasetLoader`     | Day 1 已测的话跳过             | 坏行带行号 / id 重复 / type 非法                  |
+
+**MetricsTest 对拍示例**(对照写):
+
+```java
+// 4 题构造 ItemResult:
+//   1: factual,judge=1,citeRequired=true,citeHit=true,abstained=false
+//   2: factual,judge=0,citeRequired=true,citeHit=false,abstained=false
+//   3: abstain,judge=1,citeRequired=false,citeHit=false,abstained=true
+//   4: trap,  judge=0,citeRequired=true,citeHit=false,abstained=false
+//
+// 手算:
+//   回答正确率 = 2/4 = 0.5
+//   引用准确率 = 1/3(有 cite 的是 1、2、4)
+//   拒答正确率 = (1 + 2)/4 = 0.75   ← abstain 拒了 1 个;非 abstain 未误拒 2 个(1、2)
+//   误拒率 = 0/3;abstain 拒答率 = 1/1
+// 断言:四个数字逐个对拍
+```
+
+**故意改坏**:把引用准确率分母改成「全部题数」→ 测试必须红 → 改回来。老规矩,验证测试有效。
+
+#### 5.2 README + 面试一句话(30 分钟)
+
+根 README 的 project01 章节补「评估体系」:三指标定义表、judge prompt 要点、baseline.md 链接、数据集规模。顺手把这句话写进待打磨的简历素材(第 9 周填数字):
+
+> 「设计并实现 50 题三指标离线评估体系(回答正确率 / 引用准确率 / 拒答正确率,LLM judge + 规则判定),回答正确率从 **X%**(基线)优化至 **Y%**」
+
+**这句话就是「项目含金量的一半」的具象**——X 是今天定的,Y 是第 9 周挣的。
+
+#### 5.3 周自检(20 分钟,诚实回答)
+
+- [ ] 三个指标的分子分母,能不看文档说清?
+- [ ] judge 为什么必须 temperature=0 + JSON + 判分细则?三条理由能脱口而出?
+- [ ] 六个失败模式能背出来?看一眼 baseline 的失败样本,能说出第 9 周先改什么、为什么?
+- [ ] 核心链路(指标计算 / judge 解析 / 引用判定)有没有复制粘贴?有就删掉重写
+
+#### 5.4 收尾
+
+- [ ] 进度日志:附录 C 填 W8 一行
+- [ ] git 提交:`git add -A && git commit -m "W8D5: 评估器测试 + README + 周自检"`
+
+**Day 5 打卡项**:
+
+- [ ] MetricsTest / CitationCheckerTest / AnswerJudge 解析测试全绿,改坏分母能变红
+- [ ] README 评估体系章节写完(含三指标定义)
+- [ ] 简历素材一句话写好(X 留空待第 9 周)
+- [ ] 周自检 4 条诚实过关
+
+---
+
 ### 📦 项目一交付物
 
 - [ ] 可运行服务(命令行或简单 Web 界面都行)+ 一份测试文档集

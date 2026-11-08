@@ -15,7 +15,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,7 +31,7 @@ import java.util.Map;
  * @description: 文档加载、切割、向量化、存储 CommanLineRunner
  * @create: 2026/11/1
  **/
-@ConditionalOnProperty(name = "docqa.runner.doc", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "doc-qa.runner.doc", havingValue = "true")
 @Component
 public class DocCommandLineRunner implements CommandLineRunner {
 
@@ -55,8 +54,8 @@ public class DocCommandLineRunner implements CommandLineRunner {
                                 EmbeddingModel embeddingModel,
                                 VectorStore vectorStore,
                                 @Qualifier(value = "chatClient") ChatClient chatClient,
-                                @Value("${docqa.retrieval.top-k:5}") int topK,
-                                @Value("${docqa.retrieval.min-score:0.3}") double minScore,
+                                @Value("${doc-qa.retrieval.top-k:5}") int topK,
+                                @Value("${doc-qa.retrieval.min-score:0.37}") double minScore,
                                 QueryRewriter queryRewriter,
                                 ChatMemory chatMemory,
                                 @Qualifier(value = "agenticClient") ChatClient agenticClient) {

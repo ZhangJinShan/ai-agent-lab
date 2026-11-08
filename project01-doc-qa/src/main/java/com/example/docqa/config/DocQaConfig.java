@@ -24,7 +24,7 @@ import org.springframework.context.annotation.Configuration;
 public class DocQaConfig {
 
 	@Bean
-	DocumentLoader documentLoader(@Value("${docqa.docs-dir}") String dir) {
+	DocumentLoader documentLoader(@Value("${doc-qa.docs-dir}") String dir) {
 		return new DocumentLoader(dir);
 	}
 
@@ -39,7 +39,7 @@ public class DocQaConfig {
 	}
 
 	@Bean
-	ChatMemory chatMemory(@Value("${docqa.max-message:20}") int maxMessages){
+	ChatMemory chatMemory(@Value("${doc-qa.max-message:20}") int maxMessages){
 		return MessageWindowChatMemory.builder().maxMessages(maxMessages).build();
 	}
 

@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
-@ConditionalOnProperty(name = "docqa.runner.chat", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "doc-qa.runner.chat", havingValue = "true")
 @Component
 public class ChatCommandLineRunner implements CommandLineRunner {
 
