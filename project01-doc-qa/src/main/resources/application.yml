@@ -24,6 +24,7 @@ doc-qa:
   runner:
     doc: false
     chat: false
+    eval: true
   retrieval:
     top-k: 5
     min-score: 0.37 # 拒答阈值

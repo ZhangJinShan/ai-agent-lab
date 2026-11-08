@@ -4819,11 +4819,11 @@ public class DatasetLoader {
 
 **Day 1 打卡项**:
 
-- [ ] dataset.jsonl 50 题,三类配比合理,全部带 cite(abstain 除外)
-- [ ] `EvalQuestion` + `DatasetLoader` 完成,含 id 唯一 / type 合法 / cite 与 type 匹配三重校验
-- [ ] 坏行报错带行号,实际触发验证过
-- [ ] 抽查 5 条 expected 能判分
-- [ ] git 提交:`git add -A && git commit -m "W8D1: 评估集 50 题 + DatasetLoader"`
+- [x] dataset.jsonl 50 题,三类配比合理,全部带 cite(abstain 除外)
+- [x] `EvalQuestion` + `DatasetLoader` 完成,含 id 唯一 / type 合法 / cite 与 type 匹配三重校验
+- [x] 坏行报错带行号,实际触发验证过
+- [x] 抽查 5 条 expected 能判分
+- [x] git 提交:`git add -A && git commit -m "W8D1: 评估集 50 题 + DatasetLoader"`
 
 ---
 
