@@ -61,7 +61,7 @@ public class EvalRunner {
                 // 单体失败不中断整批: 50 提跑十几分钟，中止等于白跑
                 answerErrors ++;
                 log.warn("answer 失败, id = {}", q.id(), e);
-                archive.append(row(q, "ERROR", "", "", "anwser_error: " + e.getMessage()));
+                archive.append(row(q, "ERROR", "", "", "answer_error: " + e.getMessage()));
             }
             JudgeVerdict verdict;
             try {
