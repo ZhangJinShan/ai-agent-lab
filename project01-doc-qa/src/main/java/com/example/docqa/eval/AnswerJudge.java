@@ -1,7 +1,6 @@
 package com.example.docqa.eval;
 
 import com.example.docqa.prompt.PromptTemplate;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -79,10 +78,10 @@ public class AnswerJudge {
         String userPrompt = promptTemplate.render(Map.of(
                 "question", question.question(),
                 "expected", question.expected(),
-                "actual", actual
+                "actual", actual == null ? "" : actual
         ));
         // 2. 第一次调用 + 解析
-        String raw = callJudge(JUDGE_SYSTEM_PROMPT, userPrompt);
+        String raw = callJudge(userPrompt);
         log.info("judge content: \n{}", raw);
         JudgeVerdict verdict = parse(raw);
         if (verdict != null) {
@@ -93,7 +92,7 @@ public class AnswerJudge {
         String retryUserPrompt = userPrompt + "\n\n你上一次的输出:\n" + raw
                 + "\n\n它不是合法的判分 JSON(或 score 不是 0/1、reason 为空)。请重新判分,"
                 + "只输出一个 JSON 对象,不要任何其他文字、不要 Markdown 围栏。";
-        String retryRaw = callJudge(JUDGE_SYSTEM_PROMPT, retryUserPrompt);
+        String retryRaw = callJudge(retryUserPrompt);
         log.info("judge retry content:\n{}", retryRaw);
 
         verdict = parse(retryRaw);
@@ -109,10 +108,10 @@ public class AnswerJudge {
      * 一次 chat 调用:system / options 固定,只有 user 变;
      * chat 自身异常也统一成 JudgeException
      * */
-    private String callJudge(String systemPrompt, String userPrompt) {
+    private String callJudge(String userPrompt) {
         try {
             String content = chatClient.prompt()
-                    .system(systemPrompt)
+                    .system(AnswerJudge.JUDGE_SYSTEM_PROMPT)
                     .user(userPrompt)
                     .options(ChatOptions.builder().temperature(0.0))
                     .call().content();
@@ -136,7 +135,7 @@ public class AnswerJudge {
     private JudgeVerdict parse(String raw){
         try {
             JsonNode node = objectMapper.readTree(extractJson(raw));
-            if (node == null || !node.isMissingNode() || !node.isObject()) {
+            if (node == null || node.isMissingNode() || !node.isObject()) {
                 return null;
             }
             JsonNode scoreNode = node.get("score");

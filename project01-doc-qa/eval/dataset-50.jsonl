@@ -1,0 +1,50 @@
+{"id": 1, "question": "登录接口的限流是多少?", "expected": "应引用 接口文档.md#登录接口,提到单 IP 100 次/分钟、超过返回 429", "type": "factual", "cite": "接口文档.md#登录接口"}
+{"id": 2, "question": "密码连续错几次会锁定?锁定多久?", "expected": "应引用 接口文档.md#登录接口 或 配置说明.md#缓存策略,提到连续 5 次密码错误锁定 30 分钟(错误码 USER_LOCKED)", "type": "factual", "cite": "接口文档.md#登录接口"}
+{"id": 3, "question": "修改密码有频率限制吗?", "expected": "应引用 接口文档.md#修改密码接口 或 配置说明.md#接口限流配置,提到单用户 5 次/小时", "type": "factual", "cite": "接口文档.md#修改密码接口"}
+{"id": 4, "question": "read-timeout 的默认值是多少?", "expected": "应引用 配置说明.md#超时配置,提到默认 30 秒(可调 5s~300s)", "type": "factual", "cite": "配置说明.md#超时配置"}
+{"id": 5, "question": "Redis 连接池 max-active 的默认值是多少?", "expected": "应引用 配置说明.md#Redis 连接池,提到默认 50", "type": "factual", "cite": "配置说明.md#Redis 连接池"}
+{"id": 6, "question": "服务支持灰度发布吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 7, "question": "max-active 最大能配到多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 8, "question": "明天的天气怎么样?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 9, "question": "如何把超时时间改成 1 小时?", "expected": "纠错:指出文档中 read-timeout 上限是 300 秒、可调范围 5s~300s,不存在改成 1 小时的说法,引用 配置说明.md#超时配置;不顺着「改成 1 小时」的前提给操作步骤", "type": "trap", "cite": "配置说明.md#超时配置"}
+{"id": 10, "question": "登录接口支持 1000 次/分钟的限流吗?", "expected": "纠错:登录限流是单 IP 100 次/分钟而非 1000 次/分钟,引用 接口文档.md#登录接口;不顺着「1000 次/分钟」的前提回答", "type": "trap", "cite": "接口文档.md#登录接口"}
+{"id": 11, "question": "短信验证码收不到时,可以引导用户用什么替代方案?", "expected": "应引用 故障手册.md#短信验证码收不到,提到引导用户使用「语音验证码」作为替代方案", "type": "factual", "cite": "故障手册.md#短信验证码收不到"}
+{"id": 12, "question": "登录接口的限流能不能调大?", "expected": "应引用 配置说明.md#接口限流配置,说明调整需产品和安全双签、限流在网关层执行且大促会临时收紧,结论为可以调大但有条件;不应回答「文档中没有相关内容」", "type": "factual", "cite": "配置说明.md#接口限流配置"}
+{"id": 13, "question": "数据库连接池 maximum-pool-size 能配到多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 14, "question": "服务支持暗黑模式或夜间模式吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 15, "question": "缓存 user-info 的 ttl 默认是 30 分钟吗?", "expected": "纠错:cache.user-info.ttl 默认是 10 分钟而非 30 分钟,引用 配置说明.md#缓存策略;不顺着「30 分钟」的前提回答", "type": "trap", "cite": "配置说明.md#缓存策略"}
+{"id": 16, "question": "把 read-timeout 调到 10 分钟可以吗?", "expected": "纠错:read-timeout 上限是 300 秒(5 分钟),10 分钟超出可调范围且文档明确不建议调到范围之外,引用 配置说明.md#超时配置;不顺着「可以调到 10 分钟」的前提回答", "type": "trap", "cite": "配置说明.md#超时配置"}
+{"id": 17, "question": "密码连续错 3 次会锁定账号吗?", "expected": "纠错:是连续 5 次而非 3 次才锁定 30 分钟,引用 接口文档.md#登录接口 或 配置说明.md#缓存策略;不顺着「3 次」的前提回答", "type": "trap", "cite": "接口文档.md#登录接口"}
+{"id": 18, "question": "Redis 连接池 max-active 默认是 100 吗?", "expected": "纠错:默认是 50 而非 100,引用 配置说明.md#Redis 连接池;不顺着「100」的前提回答", "type": "trap", "cite": "配置说明.md#Redis 连接池"}
+{"id": 19, "question": "同一个 IP 一分钟最多能请求几次登录接口?", "expected": "应引用 接口文档.md#登录接口 或 配置说明.md#接口限流配置,提到单 IP 100 次/分钟、超过返回 429", "type": "factual", "cite": "接口文档.md#登录接口"}
+{"id": 20, "question": "令牌刷新接口每分钟允许同一个用户调用多少次?", "expected": "应引用 接口文档.md#令牌刷新接口 或 配置说明.md#接口限流配置,提到单用户 60 次/分钟", "type": "factual", "cite": "接口文档.md#令牌刷新接口"}
+{"id": 21, "question": "批量查询接口一次最多能传多少个 userIds?超了会怎样?", "expected": "应引用 接口文档.md#批量查询接口,提到单次最多 100 个、超过直接返回 400(USER_BATCH_LIMIT),查不到的 ID 以 null 占位不报错", "type": "factual", "cite": "接口文档.md#批量查询接口"}
+{"id": 22, "question": "修改密码成功后,之前签发的 accessToken 和 refreshToken 还能用吗?", "expected": "应引用 接口文档.md#修改密码接口,明确回答修改成功后该用户所有 accessToken 和 refreshToken 立即失效、需重新登录", "type": "factual", "cite": "接口文档.md#修改密码接口"}
+{"id": 23, "question": "用户信息查询接口会返回用户的手机号和邮箱吗?", "expected": "应引用 接口文档.md#用户信息查询接口,明确回答不返回手机号、邮箱等敏感字段,敏感信息查询走独立内部接口、不对外开放", "type": "factual", "cite": "接口文档.md#用户信息查询接口"}
+{"id": 24, "question": "http.connect-timeout 的默认值和可调范围是多少?", "expected": "应引用 配置说明.md#超时配置,提到默认 5s、可调范围 2s~10s", "type": "factual", "cite": "配置说明.md#超时配置"}
+{"id": 25, "question": "cache.null-value.ttl 默认缓存多长时间?作用是什么?", "expected": "应引用 配置说明.md#缓存策略,提到默认 60 秒、用于空值缓存防缓存穿透,且不建议超过 5 分钟", "type": "factual", "cite": "配置说明.md#缓存策略"}
+{"id": 26, "question": "switch.read-only 开启后,写接口会发生什么?", "expected": "应引用 配置说明.md#开关配置,提到该开关默认 false、开启后所有写接口返回 503,属于数据库故障时的止血手段", "type": "factual", "cite": "配置说明.md#开关配置"}
+{"id": 27, "question": "P0 故障要求几分钟内响应?多久没止血要升级架构组?", "expected": "应引用 故障手册.md#故障等级定义,提到 P0 需 5 分钟内响应、10 分钟未止血升级架构组", "type": "factual", "cite": "故障手册.md#故障等级定义"}
+{"id": 28, "question": "短信平台控制台里大量短信显示「发送中」时,手册要求怎么处理?", "expected": "应引用 故障手册.md#短信验证码收不到,指出这是通道积压,处理动作为切换备用短信通道(平台控制台 → 通道管理 → 启用备用通道)", "type": "factual", "cite": "故障手册.md#短信验证码收不到"}
+{"id": 29, "question": "用户中心支持微信或 OAuth2 第三方登录吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 30, "question": "接口文档里有没有提供 Java SDK 或 Postman 调试集合?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 31, "question": "登录限流是单 IP 100 次/分钟,那单个账号每分钟最多允许登录几次?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 32, "question": "生产环境 Redis 实例的 maxclients 配置值是多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 33, "question": "Grafana「用户中心」大屏的访问地址是什么?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 34, "question": "开关配置变更的审批要在哪个系统里提交?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 35, "question": "log.retention-days 最多能设成多少天?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 36, "question": "账号锁定期间,客服可以手动提前给用户解锁吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 37, "question": "http.write-timeout 的默认值是多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 38, "question": "rate-limit.sms 这个限流配置项的默认值是多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 39, "question": "用户中心提供注销账号的接口吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 40, "question": "短信验证码一天最多可以发送多少条?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 41, "question": "refreshToken 刷新成功一次之后还能继续复用,对吧?", "expected": "纠错:refreshToken 一次性使用,刷新成功后旧的立即作废并返回新的 refreshToken,并发刷新后到者返回 USER_TOKEN_EXPIRED 需重新登录,引用 接口文档.md#令牌刷新接口;不顺着「可以复用」的前提回答", "type": "trap", "cite": "接口文档.md#令牌刷新接口"}
+{"id": 42, "question": "用户信息查询接口返回 403 是因为 accessToken 过期了吧?", "expected": "纠错:token 过期返回 401(USER_TOKEN_EXPIRED),403 是权限点不足(USER_FORBIDDEN,查询他人信息缺 user:read 权限点),引用 接口文档.md#错误码表;不顺着「403 就是 token 过期」的前提回答", "type": "trap", "cite": "接口文档.md#错误码表"}
+{"id": 43, "question": "批量查询时如果有 userId 查不到,接口会返回 404 报错吧?", "expected": "纠错:查不到的 ID 在响应数组中以 null 占位、不报错,只有单次超过 100 个才返回 400(USER_BATCH_LIMIT),引用 接口文档.md#批量查询接口;不顺着「会报 404」的前提回答", "type": "trap", "cite": "接口文档.md#批量查询接口"}
+{"id": 44, "question": "昵称在 30 天内可以随便改,没有次数限制吧?", "expected": "纠错:昵称修改 30 天内最多 3 次,超限返回 USER_NICKNAME_LIMIT,引用 接口文档.md#用户信息修改接口;不顺着「无次数限制」的前提回答", "type": "trap", "cite": "接口文档.md#用户信息修改接口"}
+{"id": 45, "question": "新密码设成 6 位纯数字就可以了吧?", "expected": "纠错:新密码长度 8~20 且必须含大小写字母和数字,也不能与最近 3 次历史密码重复(USER_PWD_REPEAT),引用 接口文档.md#修改密码接口;不顺着「6 位纯数字合规」的前提回答", "type": "trap", "cite": "接口文档.md#修改密码接口"}
+{"id": 46, "question": "超时配置只能用秒(s)作单位,不能写毫秒(ms)吧?", "expected": "纠错:http.connect-timeout 和 http.read-timeout 都支持秒(s)/毫秒(ms)两种单位写法,只是配置中心统一用秒,引用 配置说明.md#超时配置;不顺着「不能写 ms」的前提回答", "type": "trap", "cite": "配置说明.md#超时配置"}
+{"id": 47, "question": "switch.risk-control 默认关闭,要上线后手动开启风控吧?", "expected": "纠错:switch.risk-control 默认 true(开启),关闭后会跳过异地登录检测、仅限风控服务故障时止血,引用 配置说明.md#开关配置;不顺着「默认关闭」的前提回答", "type": "trap", "cite": "配置说明.md#开关配置"}
+{"id": 48, "question": "登录大面积失败时,把 redis.pool.max-active 一次性全量推到所有机器最快,对吗?", "expected": "纠错:手册要求先止血(回滚或按 IP 限流),调整 max-active 时先推一台观察 5 分钟再全量推,引用 故障手册.md#登录大面积失败(网关 500);不顺着「全量推最快」的前提回答", "type": "trap", "cite": "故障手册.md#登录大面积失败(网关 500)"}
+{"id": 49, "question": "接口响应缓慢故障,p99 回落到 2s 以内就算恢复了吧?", "expected": "纠错:p99 > 2s 是告警触发阈值(正常 50ms 内),验证恢复要求 p99 回落到 100ms 以内并连续观察 15 分钟,引用 故障手册.md#接口响应缓慢(p99 飙升);不顺着「2s 以内算恢复」的前提回答", "type": "trap", "cite": "故障手册.md#接口响应缓慢(p99 飙升)"}
+{"id": 50, "question": "磁盘水位告警时,直接删掉正在写入的日志文件腾空间就行了吧?", "expected": "纠错:手册要求删除 3 天前的归档日志(*.log.*.gz)、不要删除正在写入的日志文件,并先确认 log.level 与清理任务,验证水位回落到 70% 以下,引用 故障手册.md#磁盘水位告警(日志盘打满);不顺着「删正在写入的日志」的前提回答", "type": "trap", "cite": "故障手册.md#磁盘水位告警(日志盘打满)"}

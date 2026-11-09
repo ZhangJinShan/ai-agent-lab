@@ -5038,11 +5038,11 @@ public class EvalRunner {
 
 **Day 2 打卡项**:
 
-- [ ] `AnswerJudge` 完成:temperature=0、JSON 输出、解析失败重试、JudgeException 不静默
-- [ ] `EvalRunner` 跑通 5 题小集,逐题留档(id/type/score/reason/actual)
-- [ ] judge_error 单独计数,分母处理写清注释
-- [ ] 人工抽查 3 条 judge 判分,和 expected 对得上
-- [ ] git 提交:`git add -A && git commit -m "W8D2: EvalRunner + LLM Judge(回答正确率)"`
+- [x] `AnswerJudge` 完成:temperature=0、JSON 输出、解析失败重试、JudgeException 不静默
+- [x] `EvalRunner` 跑通 5 题小集,逐题留档(id/type/score/reason/actual)
+- [x] judge_error 单独计数,分母处理写清注释
+- [x] 人工抽查 3 条 judge 判分,和 expected 对得上
+- [x] git 提交:`git add -A && git commit -m "W8D2: EvalRunner + LLM Judge(回答正确率)"`
 
 ---
 
