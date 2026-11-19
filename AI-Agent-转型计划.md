@@ -4844,12 +4844,8 @@ public class DatasetLoader {
 #### 2.2 judge prompt(完整底稿,自己调)
 
 ```
+# system prompt
 你是评估裁判。给你一个问题、判分细则、系统的实际回答,严格按细则判 0 或 1。
-
-问题:{question}
-判分细则:{expected}
-实际回答:{actual}
-
 判分规则:
 1. 只按判分细则判分:细则没提的优点不加分,细则没提的缺点不扣分
 2. 细则要求的引用出处缺失或标错 → 判 0
@@ -4857,6 +4853,11 @@ public class DatasetLoader {
 4. 细则为「文档中没有相关内容」的题:回答必须是明确拒答;任何编造、推测、"可能是" → 判 0
 5. 只输出一个 JSON 对象,不要任何其他文字:
 {"score": 1, "reason": "一句话理由"}
+
+# user prompt
+问题:{question}
+判分细则:{expected}
+实际回答:{actual}
 ```
 
 规则 1 是防 judge 心慈手软的关键;规则 4 把 abstain 的判法写死(和 W6D3 的拒答文案约定呼应)。**judge prompt 是本项目第三个 prompt 工程对象**(回答模板、查询改写、judge)——它的调参痕迹同样要留注释。

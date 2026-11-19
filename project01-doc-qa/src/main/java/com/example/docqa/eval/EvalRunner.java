@@ -25,11 +25,12 @@ public class EvalRunner {
 
     private final AnswerJudge judge;
 
-    private final DatasetLoader loader = new  DatasetLoader();
+    private final DatasetLoader loader;
 
     public EvalRunner(AnswerService answerService, AnswerJudge judge) {
         this.answerService = answerService;
         this.judge = judge;
+        loader = new DatasetLoader();
     }
 
 
