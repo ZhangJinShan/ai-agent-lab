@@ -27,7 +27,7 @@ public class CitationChecker {
      * @param answer
      * @return
      */
-    public List<Citation> extract(String answer){
+    public static List<Citation> extract(String answer){
         List<Citation> citations = new ArrayList<>();
         Matcher matcher = CITATION.matcher(answer);
         while (matcher.find()){
@@ -45,14 +45,26 @@ public class CitationChecker {
      * @param expectedCite
      * @return
      */
-    public boolean isAccurate(String answer, String expectedCite){
-        // TODO:
-        // 1. expectedCite 判空:该题不要求引用 → 按 true 还是抛?想清楚写注释
-        //    (建议:cite 为 null 的题不参与本指标 —— 分母已在 Metrics 处理,这里防御式 true)
-        // 2. expectedCite 拆成 source + heading
+    public static boolean isAccurate(String answer, String expectedCite){
+        // 1. expectedCite 判空
+        if (expectedCite == null || expectedCite.isBlank()) {
+            return true;
+        }
+        // 2. expectedCite 拆成 source + heading, 示例: 接口文档.md#登录接口
+        String[] split = expectedCite.split("#", 2);
+        if (split.length < 2) {
+            return false;
+        }
+        String source = split[0].trim();
+        String heading = split[1].trim();
         // 3. 遍历 extract(answer):source 相等 && (heading空 || 实际 heading contains 期望 heading)→ true
+        List<Citation> citationList = extract(answer);
+        for (Citation citation : citationList) {
+            if (source.equals(citation.source) && (heading == null || heading.isEmpty() || citation.heading.contains(heading))) {
+                return true;
+            }
+        }
         // 4. 都没命中 → false
-
         return false;
     }
 }

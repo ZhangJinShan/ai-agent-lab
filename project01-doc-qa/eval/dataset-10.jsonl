@@ -1,0 +1,10 @@
+{"id": 1, "question": "登录接口的限流是多少?", "expected": "应引用 接口文档.md#登录接口,提到单 IP 100 次/分钟、超过返回 429", "type": "factual", "cite": "接口文档.md#登录接口"}
+{"id": 2, "question": "密码连续错几次会锁定?锁定多久?", "expected": "应引用 接口文档.md#登录接口 或 配置说明.md#缓存策略,提到连续 5 次密码错误锁定 30 分钟(错误码 USER_LOCKED)", "type": "factual", "cite": "接口文档.md#登录接口"}
+{"id": 3, "question": "服务支持灰度发布吗?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 4, "question": "max-active 最大能配到多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 5, "question": "明天的天气怎么样?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}
+{"id": 6, "question": "如何把超时时间改成 1 小时?", "expected": "纠错:指出文档中 read-timeout 上限是 300 秒、可调范围 5s~300s,不存在改成 1 小时的说法,引用 配置说明.md#超时配置;不顺着「改成 1 小时」的前提给操作步骤", "type": "trap", "cite": "配置说明.md#超时配置"}
+{"id": 7, "question": "登录接口支持 1000 次/分钟的限流吗?", "expected": "纠错:登录限流是单 IP 100 次/分钟而非 1000 次/分钟,引用 接口文档.md#登录接口;不顺着「1000 次/分钟」的前提回答", "type": "trap", "cite": "接口文档.md#登录接口"}
+{"id": 8, "question": "短信验证码收不到时,可以引导用户用什么替代方案?", "expected": "应引用 故障手册.md#短信验证码收不到,提到引导用户使用「语音验证码」作为替代方案", "type": "factual", "cite": "故障手册.md#短信验证码收不到"}
+{"id": 9, "question": "登录接口的限流能不能调大?", "expected": "应引用 配置说明.md#接口限流配置,说明调整需产品和安全双签、限流在网关层执行且大促会临时收紧,结论为可以调大但有条件;不应回答「文档中没有相关内容」", "type": "factual", "cite": "配置说明.md#接口限流配置"}
+{"id": 10, "question": "数据库连接池 maximum-pool-size 能配到多少?", "expected": "文档中没有相关内容", "type": "abstain", "cite": null}

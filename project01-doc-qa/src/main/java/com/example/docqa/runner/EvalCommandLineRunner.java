@@ -69,7 +69,7 @@ public class EvalCommandLineRunner implements CommandLineRunner {
         AnswerService answerService = new AnswerService(retriever, new ChatClientAnswerGenerator(agenticClient), minScore);
         EvalRunner runner = new EvalRunner(answerService, new AnswerJudge(agenticClient));
 
-        RunSummary summary = runner.run(Path.of("eval/dataset-50.jsonl"), Path.of("eval/results-run1.md"));
+        RunSummary summary = runner.run(Path.of("eval/dataset-10.jsonl"), Path.of("eval/results-run-10.md"));
         log.info("评估完成: {}", summary);
     }
 

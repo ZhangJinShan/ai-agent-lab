@@ -4666,8 +4666,8 @@ for node in response.source_nodes:
 
 ### 今天要干什么(每天约 2~2.5 小时,共 5 天)
 
-- [ ] **Day 1**:评估集 —— dataset.jsonl 补到 50 题(+ `cite` 字段改造)
-- [ ] **Day 2**:EvalRunner + LLM Judge —— 回答正确率
+- [x] **Day 1**:评估集 —— dataset.jsonl 补到 50 题(+ `cite` 字段改造)
+- [x] **Day 2**:EvalRunner + LLM Judge —— 回答正确率
 - [ ] **Day 3**:引用准确率 + 拒答正确率 —— 规则型指标
 - [ ] **Day 4**:跑批两遍 + baseline.md —— 基线与失败样本分析
 - [ ] **Day 5**:评估器测试 + README + 周自检
@@ -5163,7 +5163,7 @@ public class Metrics {
 
 **Day 3 打卡项**:
 
-- [ ] `CitationChecker` 完成:抽取 + source 精确 / heading 宽松的命中判定
+- [x] `CitationChecker` 完成:抽取 + source 精确 / heading 宽松的命中判定
 - [ ] `Metrics` 三指标 + 拒答两个子数,分子分母定义写进 javadoc
 - [ ] 5 题小集跑出的指标和手算一致
 - [ ] 除零 / judge_error 的边界处理有测试或注释
