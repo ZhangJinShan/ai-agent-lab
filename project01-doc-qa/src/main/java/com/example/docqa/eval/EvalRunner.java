@@ -1,5 +1,6 @@
 package com.example.docqa.eval;
 
+import com.example.docqa.exception.JudgeException;
 import com.example.docqa.qa.AnswerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +52,7 @@ public class EvalRunner {
         archive.append("# 评估跑批留档\n\n")
                 .append("| id | type | score | reason | question | actual | 备注 |\n")
                 .append("|---|---|---|---|---|---|---|\n");
-
+        // 收集 Metrics.ItemResult
         List<Metrics.ItemResult> itemResultList = new ArrayList<>();
         for (int i = 0; i < questions.size(); i++) {
             EvalQuestion q = questions.get(i);
@@ -73,13 +74,13 @@ public class EvalRunner {
               judgeErrors ++;
               log.warn("judge 判分失败，id = {}, raw = {}", q.id(), e.rawResponse(), e);
               archive.append(row(q, "ERROR", "", actual, "judge_error: " + e.getMessage() + " raw=" + e.rawResponse()));
-              itemResultList.add(new Metrics.ItemResult(q.id(), q.type(), 0, true, CitationChecker.isAccurate(actual, q.cite()), hasCite(q), Metrics.isAbstainAnswer(actual)));
+              itemResultList.add(new Metrics.ItemResult(q.id(), q.type(), -1, true, CitationChecker.isAccurate(actual, q.cite()), hasCite(q), Metrics.isAbstainAnswer(actual)));
               continue;
             } catch (RuntimeException e) {
                 judgeErrors ++;
                 log.warn("judge 异常, id = {}", q.id(), e);
                 archive.append(row(q, "ERROR", "", actual, "judge_error: " + e.getMessage()));
-                itemResultList.add(new Metrics.ItemResult(q.id(), q.type(), 0, true, CitationChecker.isAccurate(actual, q.cite()), hasCite(q), Metrics.isAbstainAnswer(actual)));
+                itemResultList.add(new Metrics.ItemResult(q.id(), q.type(), -1, true, CitationChecker.isAccurate(actual, q.cite()), hasCite(q), Metrics.isAbstainAnswer(actual)));
                 continue;
             }
             if (verdict.score() == 1) {
@@ -87,7 +88,6 @@ public class EvalRunner {
             }
             archive.append(row(q, String.valueOf(verdict.score()), verdict.reason(), actual, verdict.rawResponse()));
 
-            // 收集 Metrics.ItemResult
             itemResultList.add(new Metrics.ItemResult(q.id(), q.type(), verdict.score(), false, CitationChecker.isAccurate(actual,  q.cite()), hasCite(q), Metrics.isAbstainAnswer(actual)));
         }
 
@@ -100,8 +100,8 @@ public class EvalRunner {
                 .append("- answer_error: ").append(summary.answerErrors()).append('\n')
                 .append("- 回答正确率: ").append(pct(report.answerAccuracy())).append('\n')
                 .append("- 引用准确率: ").append(pct(report.citationAccuracy())).append('\n')
-                .append("- 拒答正确率: ").append(pct(report.abstainAccuracy())).append('\n')
-                .append("  - abstain 拒答率: ").append(pct(report.abstainRecall())).append('\n')
+                .append("- 拒答判断准确率: ").append(pct(report.abstainAccuracy())).append('\n')
+                .append("  - abstain 拒答召回率: ").append(pct(report.abstainRecall())).append('\n')
                 .append("  - 误拒率: ").append(pct(report.falseAbstainRate())).append('\n');
         Path parent = archivePath.getParent();
         if (parent != null) {

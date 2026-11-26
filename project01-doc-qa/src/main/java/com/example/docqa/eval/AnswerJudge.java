@@ -1,5 +1,6 @@
 package com.example.docqa.eval;
 
+import com.example.docqa.exception.JudgeException;
 import com.example.docqa.prompt.PromptTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -21,16 +21,17 @@ public class Metrics {
     public static Report summarize(List<ItemResult> items) {
         List<ItemResult> rows = items == null ? List.of() : items;
         int totalCount = rows.size();
-        int answerCorrect = 0;
-        int judgeErrors = 0;
-        int citeRequired = 0;
-        int citeHit = 0;
-        int abstainTotal = 0;
-        int abstainHit = 0;
+        int answerCorrect = 0; // 回答正确的
+        int judgeErrors = 0; // 评估失败的
+        int citeRequired = 0; // 引用的
+        int citeHit = 0; // 引用命中的
+        int abstainTotal = 0; // 拒答总数
+        int abstainHit = 0; // 拒答命中率
         int falseAbstain = 0;
         int correctNonAbstain = 0;
 
         for (ItemResult r : rows) {
+
             if (r.judgeError()) {
                 judgeErrors++;
             } else if (r.judgeScore() == 1) {
@@ -55,12 +56,16 @@ public class Metrics {
                 correctNonAbstain++;
             }
         }
-
+        // 回答准确率：回答正确数 / 总题数
         Double answerAccuracy = totalCount == 0 ? null : (double) answerCorrect / totalCount;
+        // 引用准确率: 引用命中数 / 引用总数
         Double citationAccuracy = citeRequired == 0 ? null : (double) citeHit / citeRequired;
+        // 拒答判断准确率: 分子 = 拒对 + 没误拒，分母 = 全部题
         Double abstainAccuracy = totalCount == 0 ? null
                 : (double) (abstainHit + correctNonAbstain) / totalCount;
+        // 拒答召回率: 拒答命中数 / 拒答总数
         Double abstainRecall = abstainTotal == 0 ? null : (double) abstainHit / abstainTotal;
+        // 误拒率: 误拒数 / (总题数 - 需要拒答数)
         Double falseAbstainRate = (totalCount - abstainTotal) == 0 ? null
                 : (double) falseAbstain / (totalCount - abstainTotal);
 

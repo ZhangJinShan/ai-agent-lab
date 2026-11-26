@@ -3072,7 +3072,7 @@ uv add langgraph        # 或 claude-agent-sdk,二选一
   3. **拒答正确率**(该说不知道的说了,不该说的没说)
 - [ ] 跑出**基线数字**存进 `eval/baseline.md`
 
-**第 9 周:迭代优化**
+### **第 9 周:迭代优化**
 
 按基线逐项改进,每次只改一个变量,重新跑评估:
 
@@ -4668,7 +4668,7 @@ for node in response.source_nodes:
 
 - [x] **Day 1**:评估集 —— dataset.jsonl 补到 50 题(+ `cite` 字段改造)
 - [x] **Day 2**:EvalRunner + LLM Judge —— 回答正确率
-- [ ] **Day 3**:引用准确率 + 拒答正确率 —— 规则型指标
+- [x] **Day 3**:引用准确率 + 拒答正确率 —— 规则型指标
 - [ ] **Day 4**:跑批两遍 + baseline.md —— 基线与失败样本分析
 - [ ] **Day 5**:评估器测试 + README + 周自检
 
@@ -5164,10 +5164,10 @@ public class Metrics {
 **Day 3 打卡项**:
 
 - [x] `CitationChecker` 完成:抽取 + source 精确 / heading 宽松的命中判定
-- [ ] `Metrics` 三指标 + 拒答两个子数,分子分母定义写进 javadoc
-- [ ] 5 题小集跑出的指标和手算一致
-- [ ] 除零 / judge_error 的边界处理有测试或注释
-- [ ] git 提交:`git add -A && git commit -m "W8D3: 引用准确率 + 拒答正确率(规则型指标)"`
+- [x] `Metrics` 三指标 + 拒答两个子数,分子分母定义写进 javadoc
+- [x] 10 题小集跑出的指标和手算一致
+- [x] 除零 / judge_error 的边界处理有测试或注释
+- [x] git 提交:`git add -A && git commit -m "W8D3: 引用准确率 + 拒答正确率(规则型指标)"`
 
 ---
 

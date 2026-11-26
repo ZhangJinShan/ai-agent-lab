@@ -60,7 +60,7 @@ public class CitationChecker {
         // 3. 遍历 extract(answer):source 相等 && (heading空 || 实际 heading contains 期望 heading)→ true
         List<Citation> citationList = extract(answer);
         for (Citation citation : citationList) {
-            if (source.equals(citation.source) && (heading == null || heading.isEmpty() || citation.heading.contains(heading))) {
+            if (source.equals(citation.source) && (heading.isEmpty() || citation.heading.contains(heading))) {
                 return true;
             }
         }

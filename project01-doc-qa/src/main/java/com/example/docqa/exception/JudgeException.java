@@ -1,4 +1,4 @@
-package com.example.docqa.eval;
+package com.example.docqa.exception;
 
 /**
  * @author zhangjinshan
